@@ -1,0 +1,6 @@
+*.zip
+Informacion
+__pycache__
+.vscode
+*.ods
+Datos
