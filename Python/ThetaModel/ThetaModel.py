@@ -17,11 +17,11 @@ class SimpleModel:
             self.positivos = 1390663
             self.positivos_no_detectados = 458134
             self.fallecidos = 177191
+            self.N = 127575529
 
     def conseguir_datos(self, 
         path, 
-        chun=100, 
-        eng='c', 
+        chun=100,
         enc="ISO-8859-1"):
         """
         ADVERTENCIA: Proceso lento. No ingresar un valor para el argumento
@@ -31,7 +31,7 @@ class SimpleModel:
         detectados, y fallecidos detectados (son los disponibles en el archivo)
         CSV usado
         """
-        data = pd.read_csv(path, encoding=enc, engine=eng, chunksize=chun)
+        data = pd.read_csv(path, encoding=enc, engine="c", chunksize=chun)
         hos = 0
         impo = 0
         pos = 0
@@ -39,7 +39,7 @@ class SimpleModel:
         fall = 0
 
         for ch in data:
-            hos += (ch['TIPO_PACIENTE'] == 2).sum()
+            hos += ((ch['TIPO_PACIENTE'] == 2) & (ch['CLASIFICACION_FINAL'] == 3)).sum()
             impo += ((ch['NACIONALIDAD'] == 2) & (ch['CLASIFICACION_FINAL'] == 3)).sum()
             pos += (ch['CLASIFICACION_FINAL'] == 3).sum()
             pos_u += (ch['CLASIFICACION_FINAL'].isin((1,2,4,5,6))).sum()
@@ -57,27 +57,34 @@ class SimpleModel:
         y 'extras' tienen que tener un orden específico que se basa
         en el orden en el que aparecen en las ecuaciones del artículo.
         Ese orden se describe a continuación.
-        Input:
-        betas:  vector con los valores de los coeficientes beta. Su orden
-                debe ser el siguiente:
-                    betas = [B_E, B_I, B_{I_U}, B_{I_{D_u}}, B_{H_R}, B_{H_D}]
-        gammas: vector con los valores de los coeficientes gamma. Su orden
-                debe ser el siguiente:
-                    gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, 
-                            Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
-        extras: vector con los valores de parámetros faltantes. Su orden
-                debe ser el siguiente:
-                    extras = [N, theta, omega_u, P, omega]
+
+        Parametros:
+
+        betas:  vector con los valores de los coeficientes beta. Su orden debe ser el siguiente:
+                betas = [B_E, B_I, B_{I_U}, B_{I_{D_u}}, B_{H_R}, B_{H_D}]
+        gammas: vector con los valores de los coeficientes gamma. Su orden debe ser el siguiente:
+                gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
+        extras: vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
+                extras = [N, tau_1, tau_2, theta, omega_u, P, omega]
         """
         be, bi, biu, bidu, bhr, bhd = [i for i in betas]
         ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas]
-        N, theta, wu, p, w = [i for i in extras]
-        sus, inf, rec, expo = y
+        N, t1, t2, theta, wu, p, w = [i for i in extras]
+        S, E, I, I_u, I_du, H_r, H_d, Q, R_d, R_u, D_u, D = y
         dydt = [
-            (-alpha/N)*sus*(beta*expo + inf),
-            gamma*expo - sigma*inf,
-            sigma*inf,
-            (alpha/N)*sus*(beta*expo + inf) - gamma*expo
+            -(S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d), # 1 Susceptibles
+            (S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d) - ge*E + t1 - t2, # 2 Expuestos
+            ge*E - gi*I, # 3 Infectados
+            (1 - theta - wu) * gi*I - giu*I_u, # 4 Infectados no detectados
+            wu*gi*I - gidu*I_du, # 5 Infectados no detectados que morirán
+            p*(theta - w)*gi*I - ghr*H_r, # 6 Hospitalizados que se van a recuperar
+            w*gi*I - ghd*H_d, # 7 Hospitalizados que van a fallecer
+            # ---------------------------
+            (1 - p) * (theta - w) * gi*I + ghr*H_r - gq*Q, # 8 En cuarentena
+            gq*Q, # 9 Recuperados después de ser detectados infectados
+            giu*I_u, # 10 Recuperados después de ser detectados infectados pero no detectados
+            gidu*I_du, # 11 Fallecidos por COVID-19
+            ghd*H_d, # 12 Fallecidos por COVID-19 pero no detectados
         ]
         return dydt
 
