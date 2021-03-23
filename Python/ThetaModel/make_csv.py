@@ -4,58 +4,103 @@ import math
 import csv
 from scipy.integrate import odeint
 
-path = "Datos/210103COVID19MEXICO.csv"
-eng="c", 
-enc="ISO-8859-1"
-
-data = pd.read_csv(path, encoding=enc, engine="c", chunksize=20)
-
-c = data.get_chunk()
-c['FECHA_INGRESO']
-
-days = []
-
-for index, row in c.iterrows():
-
-    fecha = row['FECHA_INGRESO']
-    hos = row['TIPO_PACIENTE']
-    imp = row['NACIONALIDAD']
-    clas = row['CLASIFICACION_FINAL']
-    fall = row['FECHA_DEF']
-
-    if fecha not in days:
-        days[fecha] = {"Hos" : 0, "Imp" : 0, "Pos" : 0, "Pos_u" : 0, "Fall" : 0}
-
-    if hos == 2 and clas == 3:
-        days[fecha]["Hos"] += 1
-    if imp == 2 and clas == 3:
-        days[fecha]["Imp"] += 1
-    if clas == 3:
-        days[fecha]["Pos"] += 1
-    if clas in (1,2,4,5,6):
-        days[fecha]["Pos_u"] += 1
-    if fall != '9999-99-99':
-        days[fecha]["Fall"] += 1
-
-
-# hospitalizados, importados, positivos, positivos no detectados, fallecidos
-days = [
-    {'Fecha' : "2020-04-02", "Hos" : 0, "Imp" : 0, "Pos" : 1, "Pos_u" : 0, "Fall" : 0},
-    {'Fecha' : "2020-03-26", "Hos" : 1, "Imp" : 0, "Pos" : 1, "Pos_u" : 0, "Fall" : 1},
-    {'Fecha' : "2020-03-28", "Hos" : 1, "Imp" : 0, "Pos" : 1, "Pos_u" : 0, "Fall" : 1},
-    {'Fecha' : "2020-03-31", "Hos" : 0, "Imp" : 0, "Pos" : 1, "Pos_u" : 0, "Fall" : 0}
-]
-
-for dics in days:
-    if dics['Fecha'] == "2020-03-31":
-        print(dics)
-
-a = np.zeros(400, dtype=object)
-a[0] = {'Fecha' : "2020-04-02", "Hos" : 0, "Imp" : 0, "Pos" : 1, "Pos_u" : 0, "Fall" : 0}
-np.trim_zeros(a)
 
 def revisar_fecha(lista_dics, fecha):
-    for dic in lista_dics:
+    for index, dic in enumerate(np.trim_zeros(lista_dics)):
         if dic['Fecha'] == fecha:
-            return False
-    return True
+            return False, index
+    return True, 0
+
+def crear_dict(path, dias=400, chunk=100):
+    lista_dics = np.zeros(dias, dtype=object)
+    data = pd.read_csv(path, encoding="ISO-8859-1", engine="c", chunksize=chunk)
+    ultimo_indice = 0
+
+    for ch in data:
+        for index, row in ch.iterrows():
+
+            fecha = row['FECHA_INGRESO']
+            _hos = row['TIPO_PACIENTE']
+            _imp = row['NACIONALIDAD']
+            _clas = row['CLASIFICACION_FINAL']
+            _fall = row['FECHA_DEF']
+
+            hos = 1 if _hos == 2 and _clas == 3 else 0
+            imp = 1 if _imp == 2 and _clas == 3 else 0
+            pos = 1 if _clas == 3 else 0
+            pos_u = 1 if _clas in (1,2,4,5,6) else 0
+            fall = 1 if _fall != '9999-99-99' else 0
+
+            val, index = revisar_fecha(lista_dics, fecha)
+
+            if not val:
+                lista_dics[index]['Hos'] += hos
+                lista_dics[index]['Imp'] += imp
+                lista_dics[index]['Pos'] += pos
+                lista_dics[index]['Pos_u'] += pos_u
+                lista_dics[index]['Fall'] += fall
+            else:
+                lista_dics[ultimo_indice] = {
+                    'Fecha' : fecha, 
+                    "Hos" : hos, 
+                    "Imp" : imp, 
+                    "Pos" : pos, 
+                    "Pos_u" : pos_u, 
+                    "Fall" : fall
+                }
+                ultimo_indice += 1
+
+    return np.trim_zeros(lista_dics)
+
+def crear_csv(dic, labels, nombre_destino):
+    try:
+        with open(nombre_destino, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=labels)
+            writer.writeheader()
+            for elem in dic:
+                writer.writerow(elem)
+    except IOError:
+        print("I/O error")
+
+destino = "Datos/new/Casos_Modelo_Theta.csv"
+fuente = "Datos/new/210321COVID19MEXICO.csv"
+
+dicc = crear_dict(fuente, dias=500)
+labels = ['Fecha', 'Hos', 'Imp', 'Pos', 'Pos_u', 'Fall']
+crear_csv(dicc, labels, destino)
+
+# Abrir manualmente el csv y ordenarlo por fecha antes de proceder
+# con el siguiente código
+
+final_data = pd.read_csv(destino)
+
+def crear_dict_2(df):
+    n = len(df)
+    lista_dicts = np.zeros(n, dtype=object)
+    hos, imp, pos, pos_u, fall = 0, 0, 0, 0, 0
+
+    lab = [i for i in df]
+
+    for index, row in df.iterrows():
+        hos += row[lab[1]]
+        imp += row[lab[2]]
+        pos += row[lab[3]]
+        pos_u += row[lab[4]]
+        fall += row[lab[5]]
+
+        lista_dicts[index] = {
+            lab[0] : row[lab[0]],
+            lab[1] : hos,
+            lab[2] : imp,
+            lab[3] : pos,
+            lab[4] : pos_u,
+            lab[5] : fall
+        }
+
+    return lista_dicts
+
+labels2 = [i for i in final_data]
+destino_final = "Datos/new/Casos_Modelo_Theta_final.csv"
+
+d = crear_dict_2(final_data)
+crear_csv(d, labels, destino_final)
