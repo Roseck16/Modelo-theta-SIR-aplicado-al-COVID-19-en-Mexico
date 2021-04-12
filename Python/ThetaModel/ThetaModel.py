@@ -4,12 +4,29 @@ from scipy.integrate import odeint
 
 path = "Datos/210103COVID19MEXICO.csv"
 
-class SimpleModel:
+class ThetaModel:
     """
     Clase que define el modelo theta-SIR
     """
 
-    def __init__(self, iniciado=True):
+    def __init__(self, fecha_inicio, fecha_fin, N=127575529):
+        """
+        Parámetros 
+        ----------
+        fecha_inicio: string
+            Texto con la fecha inicial que se desea estudiar.
+            Ejemplo: fecha_inicio = '2020-03-01'
+
+        fecha_fin: string
+            Texto con la fecha final que se desea estudiar.
+            Ejemplo: fecha_fin = '2020-12-31'
+
+        N: número
+            Número de personas antes de la pandemia.
+        """
+        self.fi = fecha_inicio
+        self.ff = fecha_fin
+        self.N = N
 
         if iniciado:
             self.hospitalizados = 505173
@@ -58,14 +75,19 @@ class SimpleModel:
         en el orden en el que aparecen en las ecuaciones del artículo.
         Ese orden se describe a continuación.
 
-        Parametros:
+        Parametros
+        ----------
 
-        betas:  vector con los valores de los coeficientes beta. Su orden debe ser el siguiente:
-                betas = [B_E, B_I, B_{I_U}, B_{I_{D_u}}, B_{H_R}, B_{H_D}]
-        gammas: vector con los valores de los coeficientes gamma. Su orden debe ser el siguiente:
-                gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
-        extras: vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
-                extras = [N, tau_1, tau_2, theta, omega_u, P, omega]
+        betas: ndarray
+            vector con los valores de los coeficientes beta. Su orden debe ser el siguiente:
+            betas = [B_E, B_I, B_{I_U}, B_{I_{D_u}}, B_{H_R}, B_{H_D}]
+
+        gammas: ndarray
+            vector con los valores de los coeficientes gamma. Su orden debe ser el siguiente:
+            gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
+        extras: ndarray
+            vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
+            extras = [N, tau_1, tau_2, theta, omega_u, P, omega]
         """
         be, bi, biu, bidu, bhr, bhd = [i for i in betas]
         ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas]
