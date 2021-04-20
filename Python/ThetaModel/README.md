@@ -1,1 +1,1 @@
-# Modelo $\theta$-SIR
+# Modelo theta-SIR
