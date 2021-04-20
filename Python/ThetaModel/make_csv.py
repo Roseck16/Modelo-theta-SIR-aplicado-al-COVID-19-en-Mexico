@@ -11,6 +11,15 @@ def revisar_fecha(lista_dics, fecha):
     return True, 0
 
 def crear_dict(path, dias=400, chunk=100):
+    """
+    ADVERTENCIA: Proceso lento. 
+        No ingresar un valor para el argumento "chun" mayor a 500
+        o se realentizará el sistema. Obtiene a partir del archivo CSV
+        los valores de personas infectadas hospotalizadas, casos 
+        importados, casos positivos, casos positivos no detectados,
+        y fallecidos detectados (son los disponibles en el archivo
+        CSV usado)
+    """
     lista_dics = np.zeros(dias, dtype=object)
     data = pd.read_csv(path, encoding="ISO-8859-1", engine="c", chunksize=chunk)
     ultimo_indice = 0

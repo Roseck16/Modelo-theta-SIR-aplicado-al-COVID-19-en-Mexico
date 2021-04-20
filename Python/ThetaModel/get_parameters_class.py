@@ -20,31 +20,72 @@ class SaveData:
 # %%
 class GetParameters:
 
-    def __init__(self, data, fecha, **kwargs):
+    def __init__(self, data, fecha, saved, **kwargs):
         """
         Parametros
         ----------
         data: list(DataFrame)
-            Lista con los datos con la fecha, número acumulado de infectados y
-            de fallecidos
+            Lista con los datos con la fecha, número acumulado de infectados,
+            de fallecidos y de personal médico infectado; en ese orden.
         fecha: String
             Fecha en el formato "YYYY-MM-DD"
         """
         self.dias = data[0]
         self.infec = data[1]
         self.fall = data[2]
-        self.fecha = fecha
-        self.t0 = datetime.strptime(self.dias.iloc[0], '%Y-%m-%d')
-        if "gamma_d" in kwargs.keys():
-            self.gamma_d = kwargs.get('gamma_d')
+        self.infec_medic = data[3]
+        self.fecha = self.day_to_index(fecha)
+        self.t0 = 0
+        self.tMAX = self.dias.loc[self.dias == self.dias.iloc[-1]].index.values[0]
+        self.gamma_d = self.get_data_dict("gamma_d", saved, **kwargs)
+        self.gamma_E = self.get_data_dict("gamma_E", saved, **kwargs)
+        self.gamma_I = self.get_data_dict("gamma_I", saved, **kwargs)
+        self.gamma_Iu = self.get_data_dict("gamma_Iu", saved, **kwargs)
+        self.gamma_IDu = self.get_data_dict("gamma_IDu", saved, **kwargs)
+        self.gamma_Hr = self.get_data_dict("gamma_Hr", saved, **kwargs)
+        self.gamma_Hd = self.get_data_dict("gamma_Hd", saved, **kwargs)
+        self.gamma_Q = self.get_data_dict("gamma_Q", saved, **kwargs)
+        self.gammas = np.array([
+            self.gamma_E, self.gamma_I, self.gamma_Iu, self.gamma_IDu, self.gamma_Hr, self.gamma_Hd, self.gamma_Q
+        ])
+        self.t_iCFR = self.get_data_dict("t_iCFR", saved, **kwargs)
+        self.iCFR = self.get_data_dict("iCFR", saved, **kwargs)
+        self.t_n = 22
+        self.t_theta0 = self.get_data_dict("t_theta0", saved, **kwargs)
+        if self.t_iCFR == None:
             self.get_t_iCFR()
-            self.t_theta0 = self.t_iCFR + 6
+
+        self.w, self.w0, self.theta = None, None, None
+        self.w_u0 = self.get_data_dict("w_u0", saved, **kwargs)
+        self.p, self.n = None, None
+
+    def get_data_dict(self, name, dict_name, **kwargs):
+        if name in dict_name.keys():
+            return dict_name.get(name)
+        elif name in kwargs.keys():
+            return kwargs.get(name)
+        else:
+            return None
 
     def diferencia_dias(self, dia1, dia2, abs_val=True):
         d1 = datetime.strptime(dia1, '%Y-%m-%d')
         d2 = datetime.strptime(dia2, '%Y-%m-%d')
         diff = abs(d1 - d2) if abs_val else d1 - d2
         return diff/timedelta(days=1)
+
+    def day_to_index(self, day):
+        if type(day) == str:
+            return self.dias.loc[self.dias == day].index.values[0]
+        elif type(day) == np.ndarray:
+            return list(
+                map(
+                    lambda x: self.dias.loc[self.dias == x].index.values[0], day
+                )
+            )
+        elif type(day) in (int, np.int64):
+            return day
+        else:
+            raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
 
     def get_gamma_d(self, path, chunk=100):
         data = pd.read_csv(path, encoding="ISO-8859-1", engine="c", chunksize=chunk)
@@ -67,7 +108,7 @@ class GetParameters:
         for index in range(7, n):
             # Según el artículo, t_iCFR >= 7 días,
             # por lo que empezamos desde el número 7
-            den = self.infec.iloc[index].value() - self.infec.iloc[index - 1]
+            den = self.infec.iloc[index] - self.infec.iloc[index - 1]
             num = self.fall.iloc[index + round(1/self.gamma_d)]
             if num != 0 and den != 0:
                 self.t_iCFR = index
@@ -75,14 +116,26 @@ class GetParameters:
                 return
         print("Error: Fecha ideal no encontrada")
 
-    def get_ms(self, ks, cs, lambdas, **kwargs):
+    def get_t_n(self):
+        n = len(self.infec_medic)
+
+        for index in range(n):
+            val = self.infec_medic[index + round(1/self.gamma_E + 1/self.gamma_I)]
+            if val != 0:
+                self.t_n = index
+                break
+
+    def get_ms(self, saved, lambdas, **kwargs):
+        ks = kwargs.get('ks')
+        cs = kwargs.get('cs')
+        lambdas = self.day_to_index(lambdas)
         q = len(lambdas) + 1
         ms = np.zeros(q)
 
         for indice in range(q):
             m = "m{}".format(indice)
-            if m in kwargs.keys():
-                ms[indice] = kwargs.get(m)
+            if m in saved.keys():
+                ms[indice] = saved.get(m)
             elif indice == 3:
                 ms[3] = cs[0] * ms[2]
             elif indice == 5:
@@ -93,32 +146,113 @@ class GetParameters:
                 t_menos = self.t0 if indice == 2 else lambdas[indice - 3]
 
                 diff_ms = ms[indice-2] - ms[indice-1]
-                diff_dias = self.diferencia_dias(t, t_menos, abs_val=False)
+                diff_dias = t - t_menos
 
                 ex = np.exp(-k * diff_dias)
                 ms[indice] = diff_ms * ex + ms[indice-1]
 
         ms_dict = {}
-        lambdas_indices = list(map(lambda x: dias.loc[dias == x].index.values[0], lambdas))
-        for fecha, m in zip(lambdas_indices, ms):
-            ms_dict[fecha_indice] = m
+        for fecha, m in zip(lambdas, ms):
+            ms_dict[fecha] = m
         self.ms = ms_dict
+        self.lambdas = lambdas
 
-    def get_w(self, fecha, max_omega, min_omega):
-        t = self.dias.loc[self.dias == fecha].index.values[0] if type(fecha) == str else fecha
-        lambdas = list(self.ms.keys())
+    def get_ñ(self, fecha):
+        infec = self.infec
+        infec_medic = self.infec_medic
+        t_n = self.t_n
+
+        t = self.day_to_index(fecha)
+        
+        if t <= t_n:
+            num = infec_medic.iloc[t_n + round(1/self.gamma_E + 1/self.gamma_I)]
+            den = infec.iloc[t_n + round(1/self.gamma_E + 1/self.gamma_I)]
+            return num / den
+
+        elif t > t_n:
+            for r in range(1, len(infec)):
+                den1 = infec.iloc[t + round(1/self.gamma_E + 1/self.gamma_I)] 
+                den2 = infec.iloc[t - r + round(1/self.gamma_E + 1/self.gamma_I)]
+
+                if den1 - den2 != 0:
+                    num1 = infec_medic.iloc[t + round(1/self.gamma_E + 1/self.gamma_I)]
+                    num2 = infec_medic.iloc[t - r + round(1/self.gamma_E + 1/self.gamma_I)]
+
+                    return (num1 - num2) / (den1 - den2)
+        else:
+            raise Exception("Error: Linear interpolation needed for 'get_ñ'")
+
+    def get_n(self, fecha):
+        t = self.day_to_index(fecha)
+        t0 = self.t0
+        tMAX = self.tMAX
+        result = 0
+
+        if t < t0 + 3:
+            for i in range(7):
+                result += self.get_ñ(t0+i)
+        elif t0 + 3 <= t and t <= t0 + tMAX - 3:
+            for i in range(-3, 4):
+                result += self.get_ñ(t+i)
+        elif t > t0 + tMAX - 3:
+            for i in range(7):
+                result += self.get_ñ(t0+tMAX-i)
+        else:
+            raise ValueError("None of the 't' values matched in 'get_n': {}".format(t))
+        
+        self.n = result / 7
+
+    def get_betas(self, fecha, saved, **kwargs):
+        fecha = self.day_to_index(fecha)
+        b_I0 = kwargs.get('b_I0')
+        c_E = kwargs.get('c_E')
+        c_u = kwargs.get('c_u')
+        c_IDu = kwargs.get('c_IDu')
+        if self.p == None:
+            self.get_p(fecha, saved, **kwargs)
+            self.get_n(fecha)
+        n = self.n
+        p = self.p
+
+        b_e0 = c_E * b_I0
+        b_I0_min = c_u * b_I0
+        b_IDu0 = c_IDu * b_I0
+
+        lambdas = self.lambdas
         q = len(lambdas)
+        for indice in range(q):
+            if indice+1 >= q or fecha <= lambdas[indice+1]:
+                m = self.ms[lambdas[indice]]
+                if self.theta >= 0 or self.theta < 1:
+                    b_Iu0 = b_I0
+                elif self.theta == 1:
+                    b_Iu0 = b_I0_min
+
+                b_e, b_I, b_Iu, b_IDu = b_e0 * m, b_I0 * m, b_Iu0 * m, b_IDu0 * m
+
+                num = n * (b_e/self.gamma_E + b_I/self.gamma_I + (1-self.theta-self.w_u0) * (b_Iu/self.gamma_Iu) + self.w_u0 * (b_IDu/self.gamma_IDu))
+                
+                den = (1 - n) * (p*(self.theta - self.w)*(1/self.gamma_Hr) + self.w*(1/self.gamma_Hd))
+
+                b_hr = num / den
+                
+                self.betas = np.array([b_e, b_I, b_Iu, b_IDu, b_hr, b_hr])
+                break
+
+    def get_w(self, fecha, **kwargs):
+        t = self.day_to_index(fecha)
+        lambdas = self.lambdas
+        q = len(lambdas)
+        max_omega = kwargs.get('max_omega')
+        min_omega = kwargs.get('min_omega')
 
         for indice in range(q):
             if indice+1 >= q or t <= lambdas[indice+1]:
-                m = ms[lambdas[indice]]
+                m = self.ms[lambdas[indice]]
                 val = m * max_omega + (1 - m) * min_omega
                 if t == self.t_theta0:
                     self.w0 = val
-                    return
-                else:
-                    self.w = val
-                    return
+                return val
 
     def get_iCFR(self, fecha):
         """
@@ -131,20 +265,23 @@ class GetParameters:
             simplemente un valor numérico que representa un índice en una
             colección de datos.
         """
-        dias = self.dias
         infec = self.infec
         fall = self.fall
         gamma_d = self.gamma_d
         t_iCFR = self.t_iCFR
 
-        t = dias.loc[dias == fecha].index.values[0] if type(fecha) == str else fecha
+        t = self.day_to_index(fecha)
 
         if t <= t_iCFR:
 
-            d_r = fall.iloc[t_iCFR + round(1/gamma_d)]
-            c_r = infec.iloc[t_iCFR]
+            if self.iCFR is None:
 
-            return d_r / c_r
+                d_r = fall.iloc[t_iCFR + round(1/gamma_d)]
+                c_r = infec.iloc[t_iCFR]
+
+                self.iCFR = d_r / c_r
+
+            return self.iCFR
         
         elif t > t_iCFR:
             for r in range(1, len(infec)):
@@ -155,12 +292,13 @@ class GetParameters:
                     num2 = fall.iloc[t - r + round(1/gamma_d)]
 
                     return (num1 - num2) / den
-        #else: TODO
+        else:
+            raise Exception("Error: Linear interpolation needed for 'get_iCFR'")
+
 
     def get_w_CFR(self, fecha):
-        t = self.dias.loc[self.dias == fecha].index.values[0] if type(fecha) == str else fecha
+        t = self.day_to_index(fecha)
         rango_dias = 7
-        gamma_d = self.gamma_d
         t_iCFR = self.t_iCFR
 
         if t <= t_iCFR:
@@ -176,99 +314,44 @@ class GetParameters:
                 else:
                     return resultado
 
-    def get_theta(self, fecha, omega=0, **kwargs):
-        t = self.dias.loc[self.dias == fecha].index.values[0] if type(fecha) == str else fecha
+    def get_theta(self, fecha, saved, **kwargs):
+        t = self.day_to_index(fecha)
         theta0 = self.t_theta0
 
-        if omega != 0:
-            num = omega
-        else:
-            ms = self.ms
-            max_omega = kwargs.get('max_omega')
-            min_omega = kwargs.get('min_omega')
-
         if t <= theta0:
-            if omega == 0:
-                self.get_w(theta0, ms, max_omega, min_omega)
-                num = self.w0
+            if 'omega0' in saved.keys():
+                self.w0 = saved.get('omega0')
+            else:
+                num = self.get_w(theta0, **kwargs)
             den = self.get_w_CFR(theta0)
-            self.theta_0 = num/den
+            self.t_theta0 = num/den
 
         elif t > self.t_theta0:
-            if omega == 0:
-                self.get_w(t, ms, max_omega, min_omega)
-                num = self.w
+            if 'omega' in saved.keys():
+                self.w = saved.get('omega')
+            else:
+                self.get_w(t, **kwargs)
+            num = self.w
             den = self.get_w_CFR(t)
-            self.theta = num/den
+        
+        return num / den
 
-    def get_p(self, fecha, p0):
-        print("'get_' not implemented")
+    def get_p(self, fecha, saved, **kwargs):
+        if self.theta == None:
+            self.theta = self.get_theta(fecha, saved, **kwargs)
+        if self.w == None:
+            self.w = self.get_w(fecha, **kwargs)
+        if self.t_theta0 == None:
+            self.t_theta0 = self.get_theta(self.t_theta0, saved, **kwargs)
+        if self.w0 == None:
+            self.w0 = self.get_w(self.t_theta0, **kwargs)
+        #self.get_w(fecha, **kwargs)
+        #self.get_w(self.t_theta0, **kwargs)
+        diff = self.theta - self.w
+        diff_0 = self.t_theta0 - self.w0
+        p0 = kwargs.get("p0")
 
-# %%
-
-days = [datetime.strptime(i, '%Y-%m-%d') for i in fechas]
-
-# %%
-full_data = "../../Datos/new/210321COVID19MEXICO.csv"
-cumulative_data = "../../Datos/new/Casos_Modelo_Theta_final.csv"
-save_file = '../../Datos/new/variables.pkl'
-
-#%%
-data = pd.read_csv(full_data, encoding="ISO-8859-1", engine="c", chunksize=100)
-cu_data = pd.read_csv(cumulative_data)
-#%%
-fechas = np.array([
-    "2020-03-20",
-    "2020-03-23",
-    "2020-03-30",
-    "2020-04-21",
-    "2020-06-01",
-])
-
-ms = np.array([
-    2.0,
-    5.0,
-    7.0,
-    9.0,
-    12.0
-])
-#%%
-d_i_f = [cu_data["Fecha"], cu_data["Positivos"], cu_data["Fallecidos"]]
-dias = d_i_f[0]
-
-# %%
-params = GetParameters(d_i_f, "2020-02-20", gamma_d = 1/13.123753454738198)
-#%%
-loader = SaveData(save_file)
-# %%
-data = {
-    "gamma_d" :1/13.123753454738198, 
-    "t_iCFR" : 22
-    #""
-}
-loader.save_data(data)
-# %%
-data2 = loader.load_data()
-# %%
-def simple_fun(a=0):
-    if a != 0:
-        b = 5
-    print("a + b = {}".format(a+b))
-# %%
-fechas_indices = list(map(lambda x: dias.loc[dias == x].index.values[0], fechas))
-#%%
-my_dic = {}
-# %%
-for fecha, num in zip(fechas_indices, ms):
-    my_dic[fecha] = num
-# %%
-for key in my_dic.keys():
-    print(key)
-# %%
-list_dic = list(my_dic.keys())
-# %%
-for indice in range(len(list_dic)):
-    if indice + 1 >= len(list_dic) or 160 < list_dic[indice + 1]:
-        print(indice)
-        break
-# %%
+        if diff >= diff_0:
+            self.p = p0 * diff_0 / diff
+        elif diff < diff_0:
+            self.p = 1 - ((1-p0)/diff_0) * diff[0, 500],

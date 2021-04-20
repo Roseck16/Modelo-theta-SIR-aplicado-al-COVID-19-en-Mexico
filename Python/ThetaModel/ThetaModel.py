@@ -1,15 +1,18 @@
+#%%
 import pandas as pd
 import math
+import numpy as np
+from get_parameters_class import SaveData, GetParameters
 from scipy.integrate import odeint
+from geneticalgorithm import geneticalgorithm as ga
 
-path = "Datos/210103COVID19MEXICO.csv"
-
+#%%
 class ThetaModel:
     """
     Clase que define el modelo theta-SIR
     """
 
-    def __init__(self, fecha_inicio, fecha_fin, N=127575529):
+    def __init__(self, saved, lambdas, N=127575529):
         """
         Parámetros 
         ----------
@@ -24,49 +27,39 @@ class ThetaModel:
         N: número
             Número de personas antes de la pandemia.
         """
-        self.fi = fecha_inicio
-        self.ff = fecha_fin
+        self.saved = saved
+        self.lambdas = lambdas
         self.N = N
 
-        if iniciado:
-            self.hospitalizados = 505173
-            self.importados = 4773
-            self.positivos = 1390663
-            self.positivos_no_detectados = 458134
-            self.fallecidos = 177191
-            self.N = 127575529
-
-    def conseguir_datos(self, 
-        path, 
-        chun=100,
-        enc="ISO-8859-1"):
+    def conseguir_datos(self, path):
         """
-        ADVERTENCIA: Proceso lento. No ingresar un valor para el argumento
-        "chun" mayor a 500 o se realentizará el sistema.
-        Obtiene a partir del archivo CSV los valores de personas infectadas
-        hospotalizadas, casos importados, casos positivos, casos positivos no
-        detectados, y fallecidos detectados (son los disponibles en el archivo)
-        CSV usado
+        
         """
-        data = pd.read_csv(path, encoding=enc, engine="c", chunksize=chun)
-        hos = 0
-        impo = 0
-        pos = 0
-        pos_u = 0
-        fall = 0
+        data = pd.read_csv(path)
+        d_i_f_im = [
+            data["Fecha"], 
+            data["Positivos"], 
+            data["Fallecidos"], 
+            data["Positivos medicos"],
+            data["Importados"]
+        ]
+        self.dias = d_i_f_im[0]
+        self.positivos = d_i_f_im[1]
+        self.data =  d_i_f_im
 
-        for ch in data:
-            hos += ((ch['TIPO_PACIENTE'] == 2) & (ch['CLASIFICACION_FINAL'] == 3)).sum()
-            impo += ((ch['NACIONALIDAD'] == 2) & (ch['CLASIFICACION_FINAL'] == 3)).sum()
-            pos += (ch['CLASIFICACION_FINAL'] == 3).sum()
-            pos_u += (ch['CLASIFICACION_FINAL'].isin((1,2,4,5,6))).sum()
-            fal += (ch['FECHA_DEF'] != '9999-99-99').sum()
-
-        self.hospitalizados = hos
-        self.importados = impo
-        self.positivos = pos
-        self.positivos_no_detectados = pos_u
-        self.fallecidos = fall
+    def day_to_index(self, day):
+        if type(day) == str:
+            return self.dias.loc[self.dias == day].index.values[0]
+        elif type(day) == np.ndarray:
+            return list(
+                map(
+                    lambda x: self.dias.loc[self.dias == x].index.values[0], day
+                )
+            )
+        elif type(day) in (int, np.int64):
+            return day
+        else:
+            raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
 
     def modelo_theta_sir(self, y, t, betas, gammas, extras):
         """
@@ -87,11 +80,11 @@ class ThetaModel:
             gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
         extras: ndarray
             vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
-            extras = [N, tau_1, tau_2, theta, omega_u, P, omega]
+            extras = [N, theta, omega_u, P, omega]
         """
         be, bi, biu, bidu, bhr, bhd = [i for i in betas]
         ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas]
-        N, t1, t2, theta, wu, p, w = [i for i in extras]
+        N, theta, wu, p, w, t1, t2 = [i for i in extras]
         S, E, I, I_u, I_du, H_r, H_d, Q, R_d, R_u, D_u, D = y
         dydt = [
             -(S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d), # 1 Susceptibles
@@ -110,29 +103,12 @@ class ThetaModel:
         ]
         return dydt
 
-    def solucion(self, alpha, beta, gamma, sigma):
-        self.sol = odeint(
-            self.simple_model, 
-            [self.sus, self.inf, self.rec, self.exp], 
-            self.t, 
-            args=(self.N, alpha, beta, gamma, sigma)
-        )
-
-    def predecir(self, tiempo, cons):
-        """
-        Hace una predicción en el tiempo a partir de unas condiciones iniciales 
-        y con constantes dadas, donde 'cons' y 'cond_in' son vectores.
-        Argumentos:
-        tiempo: Int o Float mayor que cero
-        cons: Vector de la forma [N, alpha, beta, gamma, sigma],
-        cond_in: Vector de la forma [susceptibles, infectados, removidos, expuestos]
-        """
-        self.t_pred = np.linspace(0, tiempo, tiempo)
-        self.pred = odeint(
-            self.simple_model,
-            [102089743, 2041380, 1775427, 21705629], # datos de 21 de Febrero 2021
-            self.t_pred,
-            args=(cons[0], cons[1], cons[2], cons[3], cons[4])
+    def solucion(self, t, betas, gammas, extras):
+        return odeint(
+            self.modelo_theta_sir, 
+            [1, self.N-1, 0,0,0,0,0,0,0,0,0,0], 
+            t, 
+            args=(betas, gammas, extras)
         )
 
     def distance(self, X):
@@ -143,84 +119,58 @@ class ThetaModel:
         de datos reales, los eleva al cuadrado, suma el resultado y regresa
         el resultado.
         """
-        alpha, beta, gamma, sigma = X
-        self.solucion(alpha, beta, gamma, sigma)
-        pred = self.sol[:,1]
+        gamma_Iu, gamma_IDu, gamma_Hr, gamma_Hd, gamma_Q, max_omega, min_omega, c3, c5, k1, b_I0, c_E, c_u, c_IDu, p0, w_u0 = X
+        params = GetParameters(self.data, 0, self.saved, gamma_Iu=gamma_Iu, gamma_IDu=gamma_IDu, gamma_Hr=gamma_Hr, gamma_Hd=gamma_Hd, gamma_Q=gamma_Q, w_u0=w_u0)
+
+        ks = np.array([k1])
+        cs = np.array([c3, c5])
+
+        params.get_ms(self.saved, self.lambdas, ks=ks, cs=cs)
+        gammas = params.gammas
+        q = len(self.dias)
+
+        sols = np.zeros((q, 12))
+        for indice in range(q):
+            t = self.dias.iloc[indice]
+            
+            params.get_betas(t, self.saved, b_I0=b_I0, c_E=c_E, c_u=c_u, c_IDu=c_IDu, p0=p0,max_omega=max_omega, min_omega=min_omega)
+            betas = params.betas
+            extras = np.array([
+                self.N, params.theta, params.w_u0, params.p, params.w, self.data[4].iloc[indice],0
+            ])
+            ind = self.solucion(np.array([indice, indice + 1]), betas, gammas, extras)
+            params_path = '../../Datos/new/params.pkl'
+            sol_path = '../../Datos/new/sol.pkl'
+            loader1 = SaveData(params_path)
+            loader2 = SaveData(sol_path)
+            loader1.save_data(params)
+            loader2.save_data(ind)
+
+            sols[indice] = ind[0]
+            
+        pred = sols[:,2]
 
         dis = 0
-        for index in range(len(pred)):
-            dis += (pred[index] - self.data[index])**2
+        for index in range(q):
+            dis += (pred[index] - self.positivos.iloc[index])**2
 
         return math.sqrt(dis)
 
-    def optimize_constrain(self, x0 , limit1, limit2, limit3, limit4):
-        """
-        Obtiene alpha y beta con optimización con:
-        x0: estimación inicial de alpha y beta
-        limit1: límites de alpha
-        limit2: límites de beta
-        """
-        return minimize(
-            self.distance,
-            x0,
-            method="{}".format(self.minimizer),
-            bounds=[limit1, limit2, limit3, limit4]
-        ).x
-
-    def optimize(self, x0):
-        """
-        Obtiene alpha y beta con optimización sin restricciones.
-        x0: estimación inicial de alpha y beta
-        """
-        return minimize(
-            self.distance,
-            x0,
-            method="BFGS"
-        ).x
-
-    def grafica(self, desired, compare=True, save=False, prediccion=False):
-        if prediccion:
-            t = self.t_pred
-            sol = self.pred
+    def minimize(self, bounds, dims=16, params=None):
+        if params is None:
+            model = ga(
+                function=self.distance,\
+                dimension=dims,\
+                variable_type='int',\
+                variable_boundaries=bounds
+            )
         else:
-            t = self.t
-            sol = self.sol
-
-        if "s" in desired:
-            plt.plot(t, sol[:,0], 'b', label="Susceptibles") # Susceptibles
-        if "i" in desired:
-            plt.plot(t, sol[:,1], 'r', label='Infectados') # Infectados
-        if "r" in desired:
-            plt.plot(t, sol[:,2], 'g', label="Recuperados") # Recuperados
-        if "e" in desired:
-            plt.plot(t, sol[:,3], 'y', label="Expuestos") # Expuestos
-        if desired == "all":
-            plt.plot(t, sol[:,0], 'r', label="Susceptibles")
-            plt.plot(t, sol[:,1], 'b', label='Infectados')
-            plt.plot(t, sol[:,2], 'g', label="Recuperados")
-            plt.plot(t, sol[:,3], 'y', label="Expuestos")
-                
-        if prediccion:
-            plt.legend(loc='best')
-            plt.xlabel("Tiempo")
-            if save:
-                plt.savefig("imagenes\simple_model\mexico_2020_{}_predecidos.png".format(desired))
-            else:
-                plt.show()
-        else:
-            if compare:
-                plt.plot(self.t, self.data, 's', label='Reales')
-
-            plt.legend(loc='best')
-            plt.xlabel('Tiempo ({})'.format(self.tiempo))
-            #plt.ylabel('Infectados en México')
-            if self.mes_inicio == self.mes_fin:
-                plt.title("Gráfica para el mes de {}".format(self.mes_inicio))
-            else:
-                plt.title("Gráfica para los meses de {} - {}".format(self.mes_inicio, self.mes_fin))
-            plt.grid()
-            if save:
-                plt.savefig("imagenes\simple_model\mexico_2020_{}.png".format(desired))
-            else:
-                plt.show()
-
+            model = ga(
+                function=self.distance,\
+                dimension=dims,\
+                variable_type='int',\
+                variable_boundaries=bounds,\
+                algorithm_parameters=params
+            )
+        model.run()
+        return model
