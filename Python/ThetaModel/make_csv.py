@@ -78,8 +78,8 @@ def crear_csv(dic, labels, nombre_destino):
         print("I/O error:", IOError)
 #%%
 
-destino = "../../Datos/new/Casos_Modelo_Theta2.csv"
-fuente = "../../Datos/new/210321COVID19MEXICO.csv"
+destino = "../../Datos/Casos_Modelo_Theta2.csv"
+fuente = "../../Datos oficiales/210321COVID19MEXICO.csv"
 
 dicc = crear_dict(fuente, dias=500)
 #%%
@@ -123,7 +123,7 @@ def crear_dict_2(df):
     return lista_dicts
 
 labels2 = [i for i in final_data]
-destino_final = "../../Datos/new/Casos_Modelo_Theta_final.csv"
+destino_final = "../../Datos/Casos_Modelo_Theta_final.csv"
 
 d = crear_dict_2(final_data)
 crear_csv(d, labels2, destino_final)

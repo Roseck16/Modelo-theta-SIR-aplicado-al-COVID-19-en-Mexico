@@ -139,8 +139,8 @@ class ThetaModel:
                 self.N, params.theta, params.w_u0, params.p, params.w, self.data[4].iloc[indice],0
             ])
             ind = self.solucion(np.array([indice, indice + 1]), betas, gammas, extras)
-            params_path = '../../Datos/new/params.pkl'
-            sol_path = '../../Datos/new/sol.pkl'
+            params_path = '../../Datos/saved/params.pkl'
+            sol_path = '../../Datos/saved/sol.pkl'
             loader1 = SaveData(params_path)
             loader2 = SaveData(sol_path)
             loader1.save_data(params)

@@ -5,9 +5,9 @@ import math
 from get_parameters_class import SaveData
 from ThetaModel import ThetaModel
 # %%
-full_data = "../../Datos/new/210321COVID19MEXICO.csv"
-cumulative_data = "../../Datos/new/Casos_Modelo_Theta_final.csv"
-save_file = '../../Datos/new/variables.pkl'
+full_data = "../../Datos oficiales/210321COVID19MEXICO.csv"
+cumulative_data = "../../Datos/Casos_Modelo_Theta_final.csv"
+save_file = '../../Datos/saved/variables.pkl'
 
 #%%
 #data = pd.read_csv(full_data, encoding="ISO-8859-1", engine="c", chunksize=100)
@@ -72,8 +72,8 @@ model.conseguir_datos(cumulative_data)
 # %%
 result = model.minimize(bounds)
 # %%
-params = '../../Datos/new/params.pkl'
-sol = '../../Datos/new/sol.pkl'
+params = '../../Datos/saved/params.pkl'
+sol = '../../Datos/saved/sol.pkl'
 
 loader1 = SaveData(params)
 loader2 = SaveData(sol)
