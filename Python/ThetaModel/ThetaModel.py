@@ -128,6 +128,13 @@ class ThetaModel:
         params.get_ms(self.saved, self.lambdas, ks=ks, cs=cs)
         gammas = params.gammas
         q = len(self.dias)
+        #params_path = '../../Datos/saved/params.pkl'
+        #sol_path = '../../Datos/saved/sol.pkl'
+        #solutions_path = '../../Datos/saved/solutions.pkl'
+
+        #loader1 = SaveData(params_path)
+        #loader2 = SaveData(sol_path)
+        #loader3 = SaveData(solutions_path)
 
         sols = np.zeros((q, 12))
         for indice in range(q):
@@ -139,14 +146,13 @@ class ThetaModel:
                 self.N, params.theta, params.w_u0, params.p, params.w, self.data[4].iloc[indice],0
             ])
             ind = self.solucion(np.array([indice, indice + 1]), betas, gammas, extras)
-            params_path = '../../Datos/saved/params.pkl'
-            sol_path = '../../Datos/saved/sol.pkl'
-            loader1 = SaveData(params_path)
-            loader2 = SaveData(sol_path)
-            loader1.save_data(params)
-            loader2.save_data(ind)
+
+            #loader2.save_data(ind)
 
             sols[indice] = ind[0]
+
+        #loader1.save_data(params)
+        #loader3.save_data(sols)
             
         pred = sols[:,2]
 
@@ -154,22 +160,30 @@ class ThetaModel:
         for index in range(q):
             dis += (pred[index] - self.positivos.iloc[index])**2
 
-        return math.sqrt(dis)
+        result  = math.sqrt(dis)
+        #print(result)
 
-    def minimize(self, bounds, dims=16, params=None):
+        return result
+
+    def minimize(self, bounds, dims=16, params=None, **kwargs):
+        funtimeout = kwargs.get('funtimeout', 10.0)
+        vartype = kwargs.get('vartype', 'int')
+
         if params is None:
             model = ga(
                 function=self.distance,\
                 dimension=dims,\
-                variable_type='int',\
-                variable_boundaries=bounds
+                variable_type=vartype,\
+                variable_boundaries=bounds,
+                function_timeout= funtimeout
             )
         else:
             model = ga(
                 function=self.distance,\
                 dimension=dims,\
-                variable_type='int',\
+                variable_type=vartype,\
                 variable_boundaries=bounds,\
+                function_timeout= funtimeout,
                 algorithm_parameters=params
             )
         model.run()

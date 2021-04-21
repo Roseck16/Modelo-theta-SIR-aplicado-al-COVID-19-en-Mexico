@@ -151,10 +151,13 @@ class GetParameters:
                 ex = np.exp(-k * diff_dias)
                 ms[indice] = diff_ms * ex + ms[indice-1]
 
-        ms_dict = {}
-        for fecha, m in zip(lambdas, ms):
-            ms_dict[fecha] = m
-        self.ms = ms_dict
+        if "ms_dict" in saved.keys():
+            self.ms = saved.get("ms_dict")
+        else:
+            ms_dict = {}
+            for fecha, m in zip(lambdas, ms):
+                ms_dict[fecha] = m
+            self.ms = ms_dict
         self.lambdas = lambdas
 
     def get_ñ(self, fecha):
