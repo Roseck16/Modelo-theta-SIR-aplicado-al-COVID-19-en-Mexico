@@ -5,3 +5,4 @@ __pycache__
 .vscode
 Datos_2020_No_Oficial.ods
 Datos oficiales
+.lock.*

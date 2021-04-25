@@ -55,7 +55,9 @@ class GetParameters:
         if self.t_iCFR == None:
             self.get_t_iCFR()
 
-        self.w, self.w0, self.theta = None, None, None
+        self.theta = None
+        self.w = self.get_data_dict("omega", saved, **kwargs)
+        self.w0 = self.get_data_dict("omega0", saved, **kwargs)
         self.w_u0 = self.get_data_dict("w_u0", saved, **kwargs)
         self.p, self.n = None, None
 
@@ -82,8 +84,8 @@ class GetParameters:
                     lambda x: self.dias.loc[self.dias == x].index.values[0], day
                 )
             )
-        elif type(day) in (int, np.int64):
-            return day
+        elif type(day) in (int, np.int64, np.float64, float):
+            return int(day)
         else:
             raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
 
@@ -109,18 +111,26 @@ class GetParameters:
             # Según el artículo, t_iCFR >= 7 días,
             # por lo que empezamos desde el número 7
             den = self.infec.iloc[index] - self.infec.iloc[index - 1]
-            num = self.fall.iloc[index + round(1/self.gamma_d)]
+            num_index = index + round(1/self.gamma_d)
+            if num_index >= n:
+                num = self.infec.iloc[n]
+            else:
+                num = self.fall.iloc[num_index]
             if num != 0 and den != 0:
                 self.t_iCFR = index
                 self.t_theta0 = index + 6
                 return
-        print("Error: Fecha ideal no encontrada")
+        raise Error("Error: Fecha ideal no encontrada")
 
     def get_t_n(self):
         n = len(self.infec_medic)
 
         for index in range(n):
-            val = self.infec_medic[index + round(1/self.gamma_E + 1/self.gamma_I)]
+            val_index = index + round(1/self.gamma_E + 1/self.gamma_I)
+            if val_index >= n:
+                val = self.infec_medic[n]
+            else:
+                val = self.infec_medic[val_index]
             if val != 0:
                 self.t_n = index
                 break
@@ -139,7 +149,8 @@ class GetParameters:
             elif indice == 3:
                 ms[3] = cs[0] * ms[2]
             elif indice == 5:
-                ms[5] = cs[1] * ms[2]
+                #ms[5] = cs[1] * ms[2]
+                ms[5] = cs[0] * ms[2]
             else:
                 k = ks[indice-2]
                 t = lambdas[indice - 2]
@@ -164,22 +175,42 @@ class GetParameters:
         infec = self.infec
         infec_medic = self.infec_medic
         t_n = self.t_n
+        n = len(infec)
 
         t = self.day_to_index(fecha)
         
         if t <= t_n:
-            num = infec_medic.iloc[t_n + round(1/self.gamma_E + 1/self.gamma_I)]
-            den = infec.iloc[t_n + round(1/self.gamma_E + 1/self.gamma_I)]
+            index = t_n + round(1/self.gamma_E + 1/self.gamma_I)
+            if index >= n:
+                num = infec_medic.iloc[n]
+                den = infec.iloc[n]
+            else:
+                num = infec_medic.iloc[index]
+                den = infec.iloc[index]
             return num / den
 
         elif t > t_n:
-            for r in range(1, len(infec)):
-                den1 = infec.iloc[t + round(1/self.gamma_E + 1/self.gamma_I)] 
-                den2 = infec.iloc[t - r + round(1/self.gamma_E + 1/self.gamma_I)]
+            index1 = t + round(1/self.gamma_E + 1/self.gamma_I)
+            for r in range(1, n):
+                index2  = t - r + round(1/self.gamma_E + 1/self.gamma_I)
+                if index1 >= n:
+                    den1 = infec.iloc[n]
+                else:
+                    den1 = infec.iloc[index1]
+                if index2 >= n:
+                    den2 = infec.iloc[n-r]
+                else:
+                    den2 = infec.iloc[index2]
 
                 if den1 - den2 != 0:
-                    num1 = infec_medic.iloc[t + round(1/self.gamma_E + 1/self.gamma_I)]
-                    num2 = infec_medic.iloc[t - r + round(1/self.gamma_E + 1/self.gamma_I)]
+                    if index1 >= n:
+                        num1 = infec_medic.iloc[n]
+                    else:
+                        num1 = infec_medic.iloc[index1]
+                    if index2 >= n:
+                        num2 = infec_medic.iloc[n-r]
+                    else:
+                        num2 = infec_medic.iloc[index2]
 
                     return (num1 - num2) / (den1 - den2)
         else:
@@ -225,8 +256,11 @@ class GetParameters:
         q = len(lambdas)
         for indice in range(q):
             if indice+1 >= q or fecha <= lambdas[indice+1]:
-                m = self.ms[lambdas[indice]]
-                if self.theta >= 0 or self.theta < 1:
+                if indice <= 1:
+                    m = self.ms[lambdas[0]]
+                else:
+                    m = self.ms[lambdas[indice-1]]
+                if self.theta >= 0 and self.theta < 1:
                     b_Iu0 = b_I0
                 elif self.theta == 1:
                     b_Iu0 = b_I0_min
@@ -239,8 +273,7 @@ class GetParameters:
 
                 b_hr = num / den
                 
-                self.betas = np.array([b_e, b_I, b_Iu, b_IDu, b_hr, b_hr])
-                break
+                return np.array([b_e, b_I, b_Iu, b_IDu, b_hr, b_hr])
 
     def get_w(self, fecha, **kwargs):
         t = self.day_to_index(fecha)
@@ -251,7 +284,10 @@ class GetParameters:
 
         for indice in range(q):
             if indice+1 >= q or t <= lambdas[indice+1]:
-                m = self.ms[lambdas[indice]]
+                if indice <= 1:
+                    m = self.ms[lambdas[0]]
+                else:
+                    m = self.ms[lambdas[indice-1]]
                 val = m * max_omega + (1 - m) * min_omega
                 if t == self.t_theta0:
                     self.w0 = val
@@ -272,14 +308,18 @@ class GetParameters:
         fall = self.fall
         gamma_d = self.gamma_d
         t_iCFR = self.t_iCFR
+        n = len(fall)
 
         t = self.day_to_index(fecha)
 
         if t <= t_iCFR:
 
             if self.iCFR is None:
-
-                d_r = fall.iloc[t_iCFR + round(1/gamma_d)]
+                new_index = t_iCFR + round(1/gamma_d)
+                if new_index >= n:
+                    d_r = fall.iloc[n]
+                else:
+                    d_r = fall.iloc[new_index]
                 c_r = infec.iloc[t_iCFR]
 
                 self.iCFR = d_r / c_r
@@ -287,12 +327,20 @@ class GetParameters:
             return self.iCFR
         
         elif t > t_iCFR:
-            for r in range(1, len(infec)):
+            index1 = t + round(1/gamma_d)
+            for r in range(1, n):
+                index2 = t - r + round(1/gamma_d)
                 den = infec.iloc[t] - infec.iloc[t - r]
 
                 if den != 0:
-                    num1 = fall.iloc[t + round(1/gamma_d)]
-                    num2 = fall.iloc[t - r + round(1/gamma_d)]
+                    if index1 >= n:
+                        num1 = fall.iloc[n]
+                    else:
+                        num1 = fall.iloc[index1]
+                    if index2 >= n:
+                        num2 = fall.iloc[n-r]
+                    else:
+                        num2 = fall.iloc[index2]
 
                     return (num1 - num2) / den
         else:
@@ -324,6 +372,7 @@ class GetParameters:
         if t <= theta0:
             if 'omega0' in saved.keys():
                 self.w0 = saved.get('omega0')
+                num = self.w0
             else:
                 num = self.get_w(theta0, **kwargs)
             den = self.get_w_CFR(theta0)
@@ -332,9 +381,9 @@ class GetParameters:
         elif t > self.t_theta0:
             if 'omega' in saved.keys():
                 self.w = saved.get('omega')
+                num = self.w
             else:
-                self.get_w(t, **kwargs)
-            num = self.w
+                num = self.get_w(t, **kwargs)
             den = self.get_w_CFR(t)
         
         return num / den
@@ -357,4 +406,4 @@ class GetParameters:
         if diff >= diff_0:
             self.p = p0 * diff_0 / diff
         elif diff < diff_0:
-            self.p = 1 - ((1-p0)/diff_0) * diff[0, 500],
+            self.p = 1 - ((1-p0)/diff_0) * diff

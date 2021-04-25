@@ -61,7 +61,7 @@ class ThetaModel:
         else:
             raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
 
-    def modelo_theta_sir(self, y, t, betas, gammas, extras):
+    def modelo_theta_sir(self, y, t, b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega):
         """
         Definición del modelo Theta-SIR. vectores 'betas', 'gammas'
         y 'extras' tienen que tener un orden específico que se basa
@@ -82,9 +82,32 @@ class ThetaModel:
             vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
             extras = [N, theta, omega_u, P, omega]
         """
-        be, bi, biu, bidu, bhr, bhd = [i for i in betas]
-        ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas]
-        N, theta, wu, p, w, t1, t2 = [i for i in extras]
+        betas = self.param_class.get_betas(
+            t,
+            self.saved,
+            b_I0=b_I0, 
+            c_E=c_E, 
+            c_u=c_u, 
+            c_IDu=c_IDu, 
+            p0=p0,
+            max_omega=max_omega,
+            min_omega=min_omega
+        )
+        gammas = self.param_class.gammas
+        index = t if t <= len(self.dias) else len(self.dias)
+        extras = np.array([
+                self.N, 
+                self.param_class.theta, 
+                self.param_class.w_u0, 
+                self.param_class.p, 
+                self.param_class.w, 
+                self.data[4].iloc[int(index)],
+                0
+            ])
+        be, bi, biu, bidu, bhr, bhd = [i for i in betas.T]
+        ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas.T]
+        N, theta, wu, p, w, t1, t2 = [i for i in extras.T]
+        
         S, E, I, I_u, I_du, H_r, H_d, Q, R_d, R_u, D_u, D = y
         dydt = [
             -(S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d), # 1 Susceptibles
@@ -103,67 +126,53 @@ class ThetaModel:
         ]
         return dydt
 
-    def solucion(self, t, betas, gammas, extras):
+    def solucion(self, t, b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega):
         return odeint(
             self.modelo_theta_sir, 
             [1, self.N-1, 0,0,0,0,0,0,0,0,0,0], 
-            t, 
-            args=(betas, gammas, extras)
+            t,
+            args=(b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega)
         )
 
+    
     def distance(self, X):
         """
-        Declara alpha y beta como variables y hace una predicción usando
-        el modelo.
-        Luego resta término a término el vector de predicciones y el vector
-        de datos reales, los eleva al cuadrado, suma el resultado y regresa
-        el resultado.
+        Se obtienen las variables a optimizar a partir del argumento 'X' y se obtienen los parámetros que necesita el modelo utilizando la clase 'GetParameters', con los que se obtiene una solución del modelo.
+        Luego resta término a término el vector de soluciones y el vector
+        de datos reales, los eleva al cuadrado, suma el resultado y regresa el resultado.
         """
-        gamma_Iu, gamma_IDu, gamma_Hr, gamma_Hd, gamma_Q, max_omega, min_omega, c3, c5, k1, b_I0, c_E, c_u, c_IDu, p0, w_u0 = X
-        params = GetParameters(self.data, 0, self.saved, gamma_Iu=gamma_Iu, gamma_IDu=gamma_IDu, gamma_Hr=gamma_Hr, gamma_Hd=gamma_Hd, gamma_Q=gamma_Q, w_u0=w_u0)
-
-        ks = np.array([k1])
+        gamma_Iu, gamma_IDu, gamma_Hr, gamma_Hd, gamma_Q, b_I0, c_E, c_u, c_IDu, p0, k2, c3, c5, max_omega, min_omega, w_u0 = X
+        
+        # ks = np.array([k1])
         cs = np.array([c3, c5])
+        ks = np.array([k2])
+        q = len(self.dias)
+
+        params = GetParameters(
+            self.data, 
+            0, 
+            self.saved, 
+            gamma_Iu=gamma_Iu, 
+            gamma_IDu=gamma_IDu, 
+            gamma_Hr=gamma_Hr, 
+            gamma_Hd=gamma_Hd, 
+            gamma_Q=gamma_Q,
+            w_u0=w_u0
+        )
 
         params.get_ms(self.saved, self.lambdas, ks=ks, cs=cs)
-        gammas = params.gammas
-        q = len(self.dias)
-        #params_path = '../../Datos/saved/params.pkl'
-        #sol_path = '../../Datos/saved/sol.pkl'
-        #solutions_path = '../../Datos/saved/solutions.pkl'
-
-        #loader1 = SaveData(params_path)
-        #loader2 = SaveData(sol_path)
-        #loader3 = SaveData(solutions_path)
-
-        sols = np.zeros((q, 12))
-        for indice in range(q):
-            t = self.dias.iloc[indice]
-            
-            params.get_betas(t, self.saved, b_I0=b_I0, c_E=c_E, c_u=c_u, c_IDu=c_IDu, p0=p0,max_omega=max_omega, min_omega=min_omega)
-            betas = params.betas
-            extras = np.array([
-                self.N, params.theta, params.w_u0, params.p, params.w, self.data[4].iloc[indice],0
-            ])
-            ind = self.solucion(np.array([indice, indice + 1]), betas, gammas, extras)
-
-            #loader2.save_data(ind)
-
-            sols[indice] = ind[0]
-
-        #loader1.save_data(params)
-        #loader3.save_data(sols)
-            
-        pred = sols[:,2]
-
+        self.param_class = params
+        
+        sol = self.solucion(
+            np.linspace(0, q-1, q-1, dtype=int), 
+            b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega
+        )
         dis = 0
-        for index in range(q):
-            dis += (pred[index] - self.positivos.iloc[index])**2
 
-        result  = math.sqrt(dis)
-        #print(result)
+        for indice in range(q-1):
+            dis += (sol[:,2][indice] - self.positivos.iloc[indice])**2
 
-        return result
+        return math.sqrt(dis)
 
     def minimize(self, bounds, dims=16, params=None, **kwargs):
         funtimeout = kwargs.get('funtimeout', 10.0)
