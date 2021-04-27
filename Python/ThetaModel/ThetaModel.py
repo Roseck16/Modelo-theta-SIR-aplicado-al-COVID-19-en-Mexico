@@ -61,7 +61,7 @@ class ThetaModel:
         else:
             raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
 
-    def modelo_theta_sir(self, y, t, b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega):
+    def modelo_theta_sir(self, y, t, b_I0, c_E, c_u, c_IDu, p0):
         """
         Definición del modelo Theta-SIR. vectores 'betas', 'gammas'
         y 'extras' tienen que tener un orden específico que se basa
@@ -89,9 +89,7 @@ class ThetaModel:
             c_E=c_E, 
             c_u=c_u, 
             c_IDu=c_IDu, 
-            p0=p0,
-            max_omega=max_omega,
-            min_omega=min_omega
+            p0=p0
         )
         gammas = self.param_class.gammas
         index = t if t <= len(self.dias) else len(self.dias)
@@ -126,12 +124,12 @@ class ThetaModel:
         ]
         return dydt
 
-    def solucion(self, t, b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega):
+    def solucion(self, t, b_I0, c_E, c_u, c_IDu, p0):
         return odeint(
             self.modelo_theta_sir, 
             [1, self.N-1, 0,0,0,0,0,0,0,0,0,0], 
             t,
-            args=(b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega)
+            args=(b_I0, c_E, c_u, c_IDu, p0)
         )
 
     
@@ -141,7 +139,7 @@ class ThetaModel:
         Luego resta término a término el vector de soluciones y el vector
         de datos reales, los eleva al cuadrado, suma el resultado y regresa el resultado.
         """
-        gamma_Iu, gamma_IDu, gamma_Hr, gamma_Hd, gamma_Q, b_I0, c_E, c_u, c_IDu, p0, k2, c3, c5, max_omega, min_omega, w_u0 = X
+        gamma_Iu, gamma_Hr, gamma_Hd, gamma_Q, b_I0, c_E, c_u, c_IDu, p0, k2, c3, c5, w_u0 = X
         
         # ks = np.array([k1])
         cs = np.array([c3, c5])
@@ -153,7 +151,6 @@ class ThetaModel:
             0, 
             self.saved, 
             gamma_Iu=gamma_Iu, 
-            gamma_IDu=gamma_IDu, 
             gamma_Hr=gamma_Hr, 
             gamma_Hd=gamma_Hd, 
             gamma_Q=gamma_Q,
@@ -164,8 +161,8 @@ class ThetaModel:
         self.param_class = params
         
         sol = self.solucion(
-            np.linspace(0, q-1, q-1, dtype=int), 
-            b_I0, c_E, c_u, c_IDu, p0, max_omega, min_omega
+            np.arange(q), 
+            b_I0, c_E, c_u, c_IDu, p0
         )
         dis = 0
 

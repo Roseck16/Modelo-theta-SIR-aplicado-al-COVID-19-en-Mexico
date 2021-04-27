@@ -10,8 +10,9 @@ cumulative_data = "../../Datos/Casos_Modelo_Theta_final.csv"
 save_file = '../../Datos/saved/variables.pkl'
 
 #%%
-#data = pd.read_csv(full_data, encoding="ISO-8859-1", engine="c", chunksize=100)
+data = pd.read_csv(full_data, encoding="ISO-8859-1", engine="c", chunksize=100)
 cu_data = pd.read_csv(cumulative_data)
+ch = data.get_chunk()
 #%%
 fechas = np.array([
     "2020-03-20",
@@ -36,13 +37,14 @@ data = {
     "gamma_d" :1/13.123753454738198,
     "gamma_E" : 1/5.5,
     "gamma_I" : 1/5,
+    "gamma_IDu" : 0,
     "t_iCFR" : 22,
     "t_theta0" : 22+6,
     "m0" : 1,
     "m1" : 1,
-    "m4" : 0
-    #"omega" : .014555,
-    #"omega0" : 0.50655,
+    "m4" : 0,
+    "omega" : 0.014555,
+    "omega0" : 0.50655,
     #"ms_dict" : {79: 1.0, 82: 1.0, 89: 1.0, 111: 0.0, 152: 0.0}
 }
 #%%
@@ -51,11 +53,10 @@ data = {
 #data2 = loader.load_data()
 # %%
 bounds = np.array([
-    [0, 1],
-    [0, 1],
-    [0, 1],
-    [0, 1],
-    [0, 1],
+    [0, 1], # gamma_Iu
+    [0, 1], # gamma_Hr
+    [0, 1], # gamma_Hd
+    [0, 1], # gamma_Q
     [0, 1], # b_I0
     [0, 1], # c_E
     [0, 1], # c_u
@@ -64,8 +65,8 @@ bounds = np.array([
     [0, 1], # k2
     [0, 1], # c3
     [0, 1], # c5
-    [0, 1], # max_omega
-    [0, 1], # min_omega
+    #[0, 1], # max_omega
+    #[0, 1], # min_omega
     [0, 1], # w_u0
 ])
 
@@ -84,7 +85,7 @@ model = ThetaModel(data, fechas)
 # %%
 model.conseguir_datos(cumulative_data)
 # %%
-result = model.minimize(bounds, dims=16, funtimeout=120.0, vartype='real', params=parameters)
+result = model.minimize(bounds, dims=13, funtimeout=120.0, vartype='real', params=parameters)
 
 # #%%
 # model_path = '../../Datos/saved/modelo.pkl'

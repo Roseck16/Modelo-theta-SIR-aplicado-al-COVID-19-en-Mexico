@@ -267,7 +267,8 @@ class GetParameters:
 
                 b_e, b_I, b_Iu, b_IDu = b_e0 * m, b_I0 * m, b_Iu0 * m, b_IDu0 * m
 
-                num = n * (b_e/self.gamma_E + b_I/self.gamma_I + (1-self.theta-self.w_u0) * (b_Iu/self.gamma_Iu) + self.w_u0 * (b_IDu/self.gamma_IDu))
+                #num = n * (b_e/self.gamma_E + b_I/self.gamma_I + (1-self.theta-self.w_u0) * (b_Iu/self.gamma_Iu) + self.w_u0 * (b_IDu/self.gamma_IDu))
+                num = n * (b_e/self.gamma_E + b_I/self.gamma_I + (1-self.theta-self.w_u0) * (b_Iu/self.gamma_Iu) + self.w_u0)
                 
                 den = (1 - n) * (p*(self.theta - self.w)*(1/self.gamma_Hr) + self.w*(1/self.gamma_Hd))
 
