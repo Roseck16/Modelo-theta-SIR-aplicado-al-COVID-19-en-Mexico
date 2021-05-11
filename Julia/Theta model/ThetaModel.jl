@@ -1,4 +1,5 @@
 using DifferentialEquations, Evolutionary
+using DifferentialEquations: Rosenbrock23
 include("GetModelParameters.jl")
 
 function day_to_index(day::Integer)
@@ -81,7 +82,7 @@ function ode!(du, u, p, t)
 end
 
 function check(dt,u,p,t)
-    if any(isnan, u)
+    if any(isnan, u) || any(isinf, u)
         println(p[2])
         println(u)
         println("Tiempo: $t")
@@ -93,7 +94,7 @@ end
 
 function sol(f::Function, u0::M, tspan::N, p::Vector{Any}) where {V<:Float64, M<:Vector{V}, N<:Tuple{V,V}}
     prob = ODEProblem(f, u0, tspan, p)
-    return solve(prob, adaptive=false, dt=1.0, unstable_check=check)
+    return solve(prob,Rosenbrock23(autodiff=false), adaptive=false, dt=1.0, unstable_check=check)
 end
 
 function distance(x::Vector{Float64})
@@ -116,10 +117,7 @@ function distance(x::Vector{Float64})
         "ω_u0" => ω_u0
     )
 
-    q = convert(Float64,length(data.days))
-
-    u0 = [1.0, N-1, 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
-    tspan = (1.0, q)
+    #q = convert(Float64,length(data.days))
     
     infected = sol(ode!, u0, tspan, [full_params, optim, saved])
     
@@ -128,8 +126,8 @@ function distance(x::Vector{Float64})
             (infected[3,:] .- data.infec) .^ 2
         )
     )
-    # this operation returns a result even if the 
-    # dimensions are different
+    ## this operation returns a result even if the 
+    ## dimensions are different
     # lazy_distance = sqrt(
     #     sum(
     #         map((x,y) -> (x-y)^2, infected[3,:], data.infec)

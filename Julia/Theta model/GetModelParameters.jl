@@ -142,13 +142,15 @@ struct TimeParams{M<:Real}
         elseif t > t_η
             index1 = t + delay
             num1 = index1 >= q ? infec_medic[q] : infec_medic[index1]
+            den1 = index1 >= q ? infec[q] : infec[index1]
             
             for r in 1:q
                 #index2 = t - r + delay
                 den2 = index1-r >= q ? infec[q-r] : index1-r <= 1 ? infec[1] : infec[index1-r]
-                num2 = index1-(r+7) >= q ? infec_medic[q-7] : index1-(r+7) <= 1 ? infec_medic[1] : infec_medic[index1-(r+7)]
-            den1 = index1 >= q ? infec[q] : infec[index1]
+                
                 if (den1 - den2) != 0
+                    num2 = index1-(r+7) >= q ? infec_medic[q-(r+7)] : index1-(r+7) <= 1 ? infec_medic[1] : infec_medic[index1-(r+7)]
+
                     return (num1 - num2) / (den1 - den2)
                 end
             end
