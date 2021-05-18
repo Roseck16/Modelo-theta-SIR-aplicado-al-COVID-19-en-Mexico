@@ -1,31 +1,34 @@
-using Plots, DifferentialEquations, Evolutionary
-using Dates, DataFrames
+using Plots, Dates, DataFrames, DifferentialEquations, Flux, Optim, DiffEqFlux, DiffEqSensitivity
+#import DifferentialEquations: ODEProblem
+#import DifferentialEquations: solve as df_solve
 import CSV: File as fl
-using DifferentialEquations: Rosenbrock23, Rodas4, Euler
-using JuMP, Alpine
+using BSON: @save, @load
 
-struct Data{M<:Vector{Date}, N<:Vector{Int64}}
+
+struct Data{N<:Vector{Int64}}
     """
-    Struct that contains the data for day, cumulative number of infected, infected medical personal and deaths
+    Struct that contains the data needed for the model.
     """
-    days::M
+    days::Vector{Date}
+    population::N
     infec::N
-    infec_medic::N
-    dead::N
-    imported::N
+    recovered::N
+    susceptible::N
+    exposed::N
 
     function Data(path::String)
         data = DataFrame(fl(path))
         t = data."Fecha"
+        n = data."Poblacion"
         i = data."Positivos"
-        im = data."Positivos medicos"
-        d = data."Fallecidos"
-        e = data."Importados"
-        new{Vector{Date}, Vector{Int64}}(t,i,im,d,e)
+        r = data."Recuperados"
+        sus = data."Susceptibles"
+        e = data."Expuestos"
+        new{Vector{Int64}}(t,n,i,r,sus,e)
     end
 end
 
-function simple_model(du, u, p, t)
+function simple_model!(du, u, p, t)
     #println(t)
     S, I, R, E = u
     α, β, γ, σ = p
@@ -35,56 +38,106 @@ function simple_model(du, u, p, t)
     du[4] = dE = (α/N)*S*(β*E + I) - γ*E
 end
 
-function check(dt,u,p,t)
-    if any(isnan, u) || any(isinf, u)
-        println(u)
-        println("Tiempo: $t")
-        println(p)
-        return true
-    end
-    return false
-end
-#Rosenbrock23(autodiff=false)
-function sol(f::Function, u0::M, tspan::N, p::M) where {V<:Float64, M<:Vector{V}, N<:Tuple{V,V}}
-    prob = ODEProblem(f, u0, tspan, p)
-    return solve(prob, adaptive=false, dt=1.0, unstable_check=check)
+function graf_predictions(data::Data, solution::Any, labels::Matrix{String})
+    xs = map(x -> round(Int, x),solution.t)
+    ys = [solution[2,:], data.infec[xs]]
+    
+    plot(xs,ys, label=labels)
 end
 
-function distance(x)
-    #x = [α, β, γ, σ]
-    solution = sol(simple_model, u02, tspan2, x)
-    dist = sqrt(
-        sum(
-            (solution[2,:] .- data.infec[200:300]) .^ 2
-        )
-    )
-    return dist
-end
+labels = ["Model" "Real data"]
 
-path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final.csv"
+# Get the data
+path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final_complemented.csv"
 data = Data(path)
 
-const N = 127575528.0
-const u0 = [1.0, N-1, 0.0, 0.0]
-const tspan = (1.0, 446.0)
-u02 = [N*0.8, 384554, 475795, 24325687]
-tspan2 = (200.0, 300.0)
+# Time interval and intermediary points
+tspan = (100.0, 446.0)
+tsteps = 100.0:1.0:446
 
-ga = GA(populationSize=100,selection=uniformranking(3),
-        mutation=gaussian(),crossover=uniformbin())
+# Inityal conditions
+N = data.population[Int(tspan[1])]
+u0 = [
+    data.susceptible[Int(tspan[1])],
+    data.infec[Int(tspan[1])],
+    data.recovered[Int(tspan[1])],
+    data.exposed[Int(tspan[1])]
+]
 
-up_limit = 100000
-low = [0.0, 0.0, 0.0, 0.0]
-up = [up_limit, 1.0, up_limit, up_limit]
-x0 = [0.5, 0.5, 0.5, 0.5]
+# SM equation parameter. p = [α, β, γ, σ]
+p = [0.6, 0.037, 0.0018, 0.0165]
+# p = [0.5754835798959406,
+#     0.0033489694590588155,
+#     5.043780700111756e-5,
+#     0.0
+# ]
 
-simple_sol = sol(simple_model, u0, tspan2, x0)
+# Best minimum parameters found
+@load "D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\minimum_parameters5.bson" p
 
-min_sol = Evolutionary.optimize(distance, low, up, x0, ga)
-min_param = Evolutionary.minimizer(min_sol)
+# Set up the ODE problem, then solve
+prob = ODEProblem(simple_model!, u0, tspan, p)
+sol = solve(prob)
 
-solution = sol(simple_model, u0, tspan2, min_param)
+plot(sol, vars=(0,3))
 
-plot(solution, vars=(0,2))
-plot(data.infec)
+# Plot the solution
+graf_predictions(data, sol, labels)
+#savefig("D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\simple_model_ode.png")
 
+# Optimize the model
+ function distance(p)
+    sol = solve(prob, p=p, saveat=tsteps)
+    days = map(x -> round(Int, x),sol.t)
+    distance = sqrt(sum(abs2, sol[2,:].- data.infec[days]))
+    return distance, sol
+end
+
+callback = function (p, l, pred)
+    display(l)
+    plt = graf_predictions(data, pred, labels)
+    display(plt)
+    return false
+end
+
+result_ode = DiffEqFlux.sciml_train(
+    distance, p,
+    ADAM(0.0001),
+    cb = callback,
+    maxiters = 1000
+)
+
+p = result_ode.minimizer
+
+@save "D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\minimum_parameters5.bson" p
+
+# Predictions
+tspan = (446.0, 2000.0)
+N = data.population[Int(tspan[1])]
+u0 = [
+    data.susceptible[Int(tspan[1])],
+    data.infec[Int(tspan[1])],
+    data.recovered[Int(tspan[1])],
+    data.exposed[Int(tspan[1])]
+]
+
+prob = ODEProblem(simple_model!, u0, tspan, p)
+sol = solve(prob)
+
+plot(sol, vars=(0,2))
+
+function graf_results(solution, labels)
+    xs = map(x -> round(Int, x),solution.t)
+    ys = [
+        solution[1,:],
+        solution[2,:],
+        solution[3,:],
+        solution[4,:]
+    ]
+
+    plot(xs, ys, label=labels)
+end
+
+label_results = ["Susceptible" "Infected" "Recovered" "Exposed"]
+
+graf_results(sol, label_results)
