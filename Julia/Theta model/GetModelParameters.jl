@@ -49,26 +49,28 @@ function day_to_index(day::Integer)
 end
 
 function day_to_index(day::AbstractFloat)
-    return trunc(day)
+    return round(Int64, day)
 end
 
 function day_to_index(
     date::String, 
     data::Data,
+    out_type=Int64,
     dateformat::T=DateFormat("y-m-d")
     ) where {T <: DateFormat}
 
     day = Date(date, dateformat)
-    return findfirst(x -> x == day, data.days)
+    return convert(out_type, findfirst(x -> x == day, data.days))
 end
 
 function day_to_index(
     date::Vector{String},
     data::Data,
+    out_type=Int64,
     dateformat::T=DateFormat("y-m-d")
     ) where {T <: DateFormat}
 
-    return map(x -> day_to_index(x, data, dateformat), date)
+    return map(x -> day_to_index(x, data,out_type, dateformat), date)
 end
 
 function day_to_index(date::Date, data::Data)
@@ -91,36 +93,66 @@ function get_t_η(data::Data, delay::M) where M
     return 0
 end
 
-function Msλs(dates::Vector{Int64}, ks::M, cs::M) where M
-    # If we have 4 dates, we need an extra one because we always set m0 = m1 to start with the first date.
-    q = length(dates) + 1
-    start_index = 1
+function Msλs_calculate(ms, start_index, t0, dates::N, ks::N) where N
+    k = ks[start_index]
+    t = dates[start_index]
+    tr = if start_index === 1
+        t0
+    else
+        dates[start_index-1]
+    end
+    diff_ms = ms[start_index] - ms[start_index + 1]
+    ex = exp(-k * (t - tr))
+    return diff_ms * ex + ms[start_index + 1]
+end
 
-    ms = zeros(q)
+"""
+    Msλs_loop(ms, ms_index, dates, ks, cs)
+Inner loop of the `Msλs` function
 
-    for index in 1:q
-        m = "m$(index - 1)"
-        if haskey(saved, m)::Bool
-            ms[index] = get(saved, m, 0.0)::Float64
-        elseif index in [4, 6]
-            ms[index] = cs[1] * ms[3]
-        else
-            k = ks[start_index]
-            t = Float64(dates[start_index])
-            if start_index == 1
-                tr = get(saved, "t0", 0.0)::Float64
+# Arguments
+- `ms`
+- `ms_index::Vector{Int64}` : Indexes in the `ms` vector of the available m values.
+- `dates`
+- `ks`
+- `cs`
+"""
+
+function Msλs_loop!(ms, ms_index, start_index, t0, dates::N, ks::N, cs::N) where N
+    for index in 1:length(ms)
+        if index ∉ ms_index
+            # These m's depend on another m
+            if index === 4
+                ms[index] = ms[3] * cs[1]
+            elseif index === 6
+                ms[index] = ms[3] * cs[2]
             else
-                tr = Float64(dates[start_index - 1])
+                ms[index] = Msλs_calculate(ms, start_index[1], t0, dates, ks)
+                start_index[1] += 1
             end
-
-            diff_ms = ms[start_index] - ms[start_index + 1]
-
-            ex = exp(-k * (t - tr))::Float64
-            ms[index] = diff_ms * ex + ms[start_index + 1]
-
-            start_index += 1
         end
     end
+end
+
+
+function Msλs(t0, dates::M, ks::M, cs::M) where M
+    # If we have 4 dates, we need an extra one because we always set m0 = m1 to start with the first date.
+    q = length(dates) + 1
+    start_index = [1]
+
+    # Initialize a vector with the values of m available
+    ms = [
+        1.0, # m0
+        1.0, # m1
+        0.0, 
+        0.0, 
+        0.0, # m4 
+        0.0
+    ]
+
+    ms_index = [1,2,5]
+
+    Msλs_loop!(ms, ms_index, start_index, t0, dates, ks, cs)
     return ms
 end
 
@@ -279,7 +311,7 @@ function get_iCFR_greater(t::M, data::Data, γ_d::M) where M
 end
 
 function get_ω_CFR_loop1!(days_range,_sum, t, data, t_iCFR, γ_d)
-    for i in 0.0:days_range[1]
+    for i in 0:days_range[1]
         _sum[1] += if t - i <= t_iCFR
             get_iCFR_less(t_iCFR, data, γ_d)
         else
@@ -289,11 +321,11 @@ function get_ω_CFR_loop1!(days_range,_sum, t, data, t_iCFR, γ_d)
 end
 
 function get_ω_CFR_loop2!(t, data, t_iCFR, γ_d)
-    days_range = [6.0]
+    days_range = [6]
     while true
         _sum = [0.0]
         get_ω_CFR_loop1!(days_range,_sum, t, data, t_iCFR, γ_d)
-        result = _sum[1] / (days_range[1] + 1.0)
+        result = _sum[1] / Float64(days_range[1] + 1)
         if result <= 0.015
             days_range[1] += 1.0
         else
@@ -318,6 +350,7 @@ function get_ω_loop(q, t, ms, λs)
             return ms[end]
         end
     end
+end
 
 function get_ω(t::M, ms::N, λs::N, max_ω::O, min_ω::O) where {M,N,O}
     q = length(λs)
@@ -328,7 +361,7 @@ end
 function TimeParams(
     t::M, data::Data,
     t0::M, tMAX::M, t_iCFR::M, t_θ0::M, t_η::M,
-    γ_d::M, γ_E::M, γ_I::M, 
+    γ_d::M, delay::M, 
     ρ0::N, # This parameter is optimized
     ω_0::N, ω_CFR0::N, θ_0::N; # These parameters can be calculated from others
     _ω=nothing, # If the value of ω is given, these 
@@ -337,11 +370,10 @@ function TimeParams(
     max_ω=nothing,
     min_ω=nothing
     ) where {M,N}
-    delay1 = round(Int, γ_E + γ_I)
     ω = isnothing(_ω) ? get_ω(t, ms, λs, max_ω, min_ω) : _ω
     ω_CFR = get_ω_CFR(t, data, t_iCFR, γ_d)
     θ = t <= t_θ0 ? ω_0 / ω_CFR0 : ω / ω_CFR
-    η = get_η(t, data, t0, tMAX, t_η, delay1)
+    η = get_η(t, data, t0, tMAX, t_η, delay)
     ρ = get_ρ(ω_0, ω, θ_0, θ, ρ0)
     
     return ω, θ, η, ρ, 0, data.imported[t]
@@ -360,18 +392,18 @@ end
 function get_β_Iu0(θ, val1, val2)
     θ >= 0.0 || error("θ is not positive")
     θ < 1.0 && return val1
-            θ === 1.0 && return val2
-            error("θ greater than 1")
+    θ === 1.0 && return val2
+    error("θ greater than 1")
 end
 
 function βs(
     t::M, 
-    ω::M, θ::M, ω_u0::M, η::M, ρ::M, 
+    ω::N, θ::N, ω_u0::N, η::N, ρ::N, 
     ms::O, λs::O,
-    γ_E::M, γ_I::M, γ_Iu::M, γ_Hr::M, γ_Hd::M, 
-    β_I0::M, β_e0::M, β_I0_min::M
+    γ_E::N, γ_I::N, γ_Iu::N, γ_Hr::N, γ_Hd::N, 
+    β_I0::N, β_e0::N, β_I0_min::N
     # β_I0::N, c_E::N, c_u::N
-    ) where {M,O}
+    ) where {M,N,O}
 
     # β_e0, β_I0_min = (c_E, c_u) .* β_I0
 
