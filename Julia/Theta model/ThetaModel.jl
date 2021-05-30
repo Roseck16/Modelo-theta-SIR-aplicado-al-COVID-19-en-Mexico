@@ -1,142 +1,130 @@
-using DifferentialEquations, Evolutionary
-using DifferentialEquations: Rosenbrock23
+using DifferentialEquations
 include("GetModelParameters.jl")
 
-function day_to_index(day::Integer)
-    return day
+function ThetaModel!(du::M, u::M, p::M, t::Float64) where {M<:Vector{Float64}}
+    S, E, I, Iu, hr, hd, Q, _, _, _ = u
+    γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, k2, c3, c5, ω_0, ω_CFR0, θ_0, ω, β_I0, c_E, c_u, ρ0, ω_u = p
+
+    #t >= 2.0 ? error("Its time") : println("Hello")
+    ms = Msλs(dates, [(k2)], [(c3), (c5)])
+    ω, θ, η, ρ, τ1, τ2 = TimeParams(
+        trunc(Int64, t), data,
+        t0, tMAX, t_iCFR, t_θ0, t_η,
+        trunc(Int64,γ_d), trunc(Int64,γ_E), trunc(Int64,γ_I),
+        ρ0,
+        ω_0, ω_CFR0, θ_0, _ω=ω
+        )
+    
+    β_e, β_I, β_Iu, β_hr, β_hd = βs(
+        trunc(Int64, t),
+        ω, θ, ω_u, η, ρ,
+        ms, Float64.(λs),
+        trunc(Int64,γ_E), trunc(Int64,γ_I), trunc(Int64,γ_Iu), trunc(Int64,γ_Hr), trunc(Int64,γ_Hd), 
+        β_I0, c_E, c_u
+        )
+        # b1 = β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd
+    
+    # ODE system
+    # du[1] = -(S/N) * b1
+    # du[2] = (S/N) * b1 - E/γ_E + τ1 - τ2
+    du[1] = -(S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd)
+    du[2] = (S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd) - E/γ_E + τ1 - τ2
+    du[3] = E/γ_E - I/γ_I
+    du[4] = (1 - θ - ω_u) * I/γ_I - Iu/γ_Iu
+    # du[5] = ω_u * I/γ_I
+    du[5] = ρ * (θ - ω) * I/γ_I - hr/γ_Hr
+    du[6] = ω * I/γ_I - hd/γ_Hd
+    # du[7] = (1 - ρ) * (θ - ω) * I/γ_I + hr/γ_Hr - γ_Q * Q
+    # du[8] = Q/γ_Q
+    # du[9] = Iu/γ_Iu
+    # du[10] = hd/γ_Hd
 end
 
-function day_to_index(day::AbstractFloat)
-    return round(Int, day)
+function ThetaModel!(du, u, p, t)
+    S, E, I, Iu, hr, hd, Q, _, _, _ = u
+    γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, k2, c3, c5, ω_0, ω_CFR0, θ_0, ω, β_I0, c_E, c_u, ρ0, ω_u = p
+
+    t >= 1.5 ? error("Its time") : display(typeof(p))
+    ms, λs = Msλs(dates, [ReverseDiff.value(k2)], [ReverseDiff.value(c3), ReverseDiff.value(c5)])
+    
+    ω, θ, η, ρ, τ1, τ2 = TimeParams(
+        ReverseDiff.value(t), data,
+        ReverseDiff.value(t0), ReverseDiff.value(tMAX), ReverseDiff.value(t_iCFR), ReverseDiff.value(t_θ0), ReverseDiff.value(t_η),
+        ReverseDiff.value(γ_d), ReverseDiff.value(γ_E), ReverseDiff.value(γ_I),
+        ReverseDiff.value(ρ0),
+        ReverseDiff.value(ω_0), ReverseDiff.value(ω_CFR0), ReverseDiff.value(θ_0), _ω=ReverseDiff.value(ω)
+        )
+    
+    β_e, β_I, β_Iu, β_hr, β_hd = βs(
+        ReverseDiff.value(t),
+        ReverseDiff.value(ω), ReverseDiff.value(θ), ReverseDiff.value(ω_u), ReverseDiff.value(η), ReverseDiff.value(ρ),
+        ReverseDiff.value(ms), ReverseDiff.value(λs),
+        ReverseDiff.value(γ_E), ReverseDiff.value(γ_I), ReverseDiff.value(γ_Iu), ReverseDiff.value(γ_Hr), ReverseDiff.value(γ_Hd), 
+        ReverseDiff.value(β_I0), ReverseDiff.value(c_E), ReverseDiff.value(c_u)
+        )
+        # b1 = β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd
+    
+    # ODE system
+    # du[1] = -(S/N) * b1
+    # du[2] = (S/N) * b1 - E/γ_E + τ1 - τ2
+    du[1] = -(S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd)
+    du[2] = (S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd) - E/γ_E + τ1 - τ2
+    du[3] = E/γ_E - I/γ_I
+    du[4] = (1 - θ - ω_u) * I/γ_I - Iu/γ_Iu
+    # du[5] = ω_u * I/γ_I
+    du[5] = ρ * (θ - ω) * I/γ_I - hr/γ_Hr
+    du[6] = ω * I/γ_I - hd/γ_Hd
+    # du[7] = (1 - ρ) * (θ - ω) * I/γ_I + hr/γ_Hr - γ_Q * Q
+    # du[8] = Q/γ_Q
+    # du[9] = Iu/γ_Iu
+    # du[10] = hd/γ_Hd
 end
 
-function day_to_index(
-    date::String, 
-    data::Data,
-    dateformat::T=DateFormat("y-m-d")
-    ) where {T<:DateFormat}
-
-    day = Date(date, dateformat)
-    return findfirst(x -> x==day, data.days)
-end
-
-function day_to_index(
-    date::Vector{String},
-    data::Data,
-    dateformat::T=DateFormat("y-m-d")
-    ) where {T<:DateFormat}
-
-    return map(x -> day_to_index(x, data, dateformat), date)
-end
-
-function day_to_index(date::Date, data::Data)
-    return findfirst(x -> x==date, data.days)
-end
-
-function day_to_index(date::Vector{Date}, data::Data)
-    return map(x -> day_to_index(x, data), date)
-end
-
-
-#struct ThetaModel
-#    solution::Any
-
-# function ode!(du, u, p, t)
-#     S, E, I, Iu, IDu, hr, hd, Q, Rd, Ru, Du, D = u
-#     γ_d, γ_E, γ_I, γ_Iu, γ_IDu, γ_Hr, γ_Hd, γ_Q, θ, ω, ω_u, ρ, τ1, τ2, β_e, β_I, β_Iu, β_IDu, β_hr, β_hd, N = p[1](t)
-
-#     du[1] = -(S/N) * (β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd)
-#     du[2] = (S/N) * (β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd) - γ_E * E + τ1 - τ2
-#     du[3] = γ_E * E - γ_I * I
-#     du[4] = (1 - θ - ω_u) * γ_I * I - γ_Iu * Iu
-#     du[5] = ω_u * γ_I * I - γ_IDu * IDu
-#     du[6] = ρ * (θ - ω) * γ_I * I - γ_Hr * hr
-#     du[7] = ω * γ_I * I - γ_Hd * hd
-#     du[8] = (1 - ρ) * (θ - ω) * γ_I * I + γ_Hr * hr - γ_Q * Q
-#     du[9] = γ_Q * Q
-#     du[10] = γ_Iu * Iu
-#     du[11] = γ_IDu * IDu
-#     du[12] = γ_Hd * hd
-# end
-
-function ode!(du, u, p, t)
-    fun_params = p[1]
-    opt_params = p[2]
-    saved_params = p[3]
-    γ_d, γ_E, γ_I, γ_Iu, γ_IDu, γ_Hr, γ_Hd, γ_Q, θ, ω, ω_u, ρ, τ1, τ2, β_e, β_I, β_Iu, β_IDu, β_hr, β_hd, N = fun_params(t, opt_params ,saved_params)
-
-    S, E, I, Iu, IDu, hr, hd, Q, Rd, Ru, Du, D = u
-
-    du[1] = -(S/N) * (β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd)
-    du[2] = (S/N) * (β_e * E + β_I * I + β_Iu * Iu + β_IDu * IDu + β_hr * hr + β_hd * hd) - γ_E * E + τ1 - τ2
-    du[3] = γ_E * E - γ_I * I
-    du[4] = (1 - θ - ω_u) * γ_I * I - γ_Iu * Iu
-    du[5] = ω_u * γ_I * I - γ_IDu * IDu
-    du[6] = ρ * (θ - ω) * γ_I * I - γ_Hr * hr
-    du[7] = ω * γ_I * I - γ_Hd * hd
-    du[8] = (1 - ρ) * (θ - ω) * γ_I * I + γ_Hr * hr - γ_Q * Q
-    du[9] = γ_Q * Q
-    du[10] = γ_Iu * Iu
-    du[11] = γ_IDu * IDu
-    du[12] = γ_Hd * hd
-end
-
-function check(dt,u,p,t)
+"""
+    check(dt,u,p,t)
+If the model finds some of the solutions to be unstable (NaN or Inf), call this function for debugging. It prints the solution values, the time and the parameters used when the solution returned NaN
+"""
+function check(dt, u, p, t)
     if any(isnan, u) || any(isinf, u)
-        println(p[2])
+        println(p)
         println(u)
         println("Tiempo: $t")
-        println(p[1](t, p[2], p[3]))
         return true
     end
     return false
 end
 
-function sol(f::Function, u0::M, tspan::N, p::Vector{Any}) where {V<:Float64, M<:Vector{V}, N<:Tuple{V,V}}
-    prob = ODEProblem(f, u0, tspan, p)
-    return solve(prob,Rosenbrock23(autodiff=false), adaptive=false, dt=1.0, unstable_check=check)
-end
-
-function distance(x::Vector{Float64})
-    γ_Iu, γ_E, γ_I, γ_IDu, γ_Q, γ_Hr, γ_Hd, β_I0, c_E, c_u, c_IDu, ρ0, k2, c3, c5, ω_u0 = x
-    optim = Dict(
-        "γ_Iu" => γ_Iu,
-        "γ_Q" => γ_Q,
-        "γ_Hr" => γ_Hr,
-        "γ_Hd" => γ_Hd,
-        "γ_E" => γ_E,
-        "γ_I" => γ_I,
-        "γ_IDu" => γ_IDu,
-        "β_I0" => β_I0,
-        "c_E" => c_E,
-        "c_u" => c_u,
-        "c_IDu" => c_IDu,
-        "ρ0" => ρ0,
-        "ks" => [k2],
-        "cs" => [c3,c5],
-        "ω_u0" => ω_u0
-    )
-
-    #q = convert(Float64,length(data.days))
+function distance(x)
     
-    infected = sol(ode!, u0, tspan, [full_params, optim, saved])
+    # Assing the values in ´x´ to a variable
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, β_I0, c_E, c_u, ρ0, k2, c3, c5, ω_u0 = x
     
-    distance = sqrt(
-        sum(
-            (infected[3,:] .- data.infec) .^ 2
-        )
-    )
-    ## this operation returns a result even if the 
-    ## dimensions are different
-    # lazy_distance = sqrt(
-    #     sum(
-    #         map((x,y) -> (x-y)^2, infected[3,:], data.infec)
-    #     )
-    # )
-    return distance
+    # Get some of the parameters that are known
+    ω = get(saved, "ω", 0.0)::Float64
+    γ_d = trunc(Int64,get(saved, "γ_d", 0))
+    
+    # These are non time-dependent parameters that we can already calculate or retrieve from a Dictionary
+    ω_0 = get(saved, "ω_0") do
+        get_ω(t_θ0, ms, λs, max_ω, min_ω)
+    end
+    ω_CFR0 = get(saved, "ω_CFR0") do
+        get_ω_CFR(t_θ0, data, t_iCFR, γ_d)
+    end
+    θ_0 = get(saved, "θ0") do
+        get_θ(t_θ0, t_θ0, ω_0, ω, ω_CFR0, 0.0)
+    end
+    
+    p = [
+        γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, # gammas
+        k2, c3, c5,
+        ω_0, ω_CFR0, θ_0, ω, # Arguments for time parameters
+        β_I0, c_E, c_u, ρ0, ω_u0
+    ]
+    # Solve the ODE problem and calculate the difference between the solution and the real data
+    
+    sol = solve(prob, p=p, tstops=tsteps, unstable_check=check)
+    
+    days = map(x -> trunc(x), sol.t)
+    distance = sqrt(sum(abs2, sol[3,:] .- data.infec[days]))
+    return distance, sol
 end
-
-function minim(x0::M, low::M, up::M, parameters::GA) where {M<:Vector{Float64}}
-    return Evolutionary.optimize(distance, low, up, x0, parameters)
-end
-

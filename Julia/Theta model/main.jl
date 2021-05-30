@@ -1,28 +1,28 @@
 include("ThetaModel.jl")
-using Plots
-using BSON: @save, @load
-#using CUDA, Evolutionary
+#include("GetModelParameters.jl")
+using Plots, Flux, Optim, DiffEqFlux, DiffEqSensitivity, ReverseDiff
+using BenchmarkTools
+#using BSON: @save, @load
 
+function graf_predictions(data::Data, solution, labels::Matrix{String})
+    xs = map(x -> round(Int, x),solution.t)
+    ys = [solution[3,:], data.infec[xs]]
+    plot(xs,ys, label=labels)
+end
 
-
-saved = Dict(
-    "t0" => 0,
-    "tMAX" => 446,
-    "t_iCFR" => 23,
-    "t_θ0" => 29,
-    "t_n" => 13,
-    "γ_d" => 1/13.123753454738198,
+const t0, tMAX, t_iCFR, t_θ0, t_η = 0, 446, 23, 29, 13
+const saved = Dict{String,Float64}(
+    "γ_d" => 13.123753454738198,
     #"γ_E" => 1/5.5,
     #"γ_I" => 1/5,
-    #"γ_IDu" => 0,
-    "m0" => 1,
-    "m1" => 1,
-    "m4" => 0,
+    "m0" => 1.0,
+    "m1" => 1.0,
+    "m4" => 0.0,
     "ω" => 0.014555,
     "ω_0" =>0.50655
 )
 
-lambdas = [
+const lambdas = [
     "2020-03-20",
     "2020-03-23",
     "2020-03-30",
@@ -30,75 +30,167 @@ lambdas = [
     "2020-06-01"
 ]
 
+labels = ["Model" "Real data"]
 
+# Get the data
+path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final_complemented.csv"
+const data = Data(path)
 
-const N = 127575528.0
-const u0 = [1.0, N-1, 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
-const tspan = (1.0, 446.0)
+const dates = day_to_index(lambdas, data)
 
-#st_pr = StaticParams(opt, saved)
+# Time interval and intermediary points
+tspan = (1.0, 446.0)
+tsteps = 1.0:1.0:446.0
 
-path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final.csv"
-data = Data(path)
-dates = day_to_index(lambdas, data)
+# Inityal conditions
+N = Float64(data.population[Int(tspan[1])])
+u0 = [
+    data.susceptible[Int(tspan[1])],
+    data.exposed[Int(tspan[1])],
+    data.infec[Int(tspan[1])], # Infected 
+    data.infec_u[Int(tspan[1])], # Infected undetected
+    #data.infec_u[Int(tspan[1])]*0.3, # Infected undetected that will die
+    data.hospitalized[Int(tspan[1])],
+    data.hospitalized[Int(tspan[1])]*0.3,
+    data.quarentine[Int(tspan[1])],
+    data.recovered[Int(tspan[1])],
+    data.recovered[Int(tspan[1])]*1.3,
+    #data.dead[Int(tspan[1])]*0.3,
+    data.dead[Int(tspan[1])]
+]
 
+# θ-M equation parameters. 
+γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q = 5.5, 5.0, 9.0, 14.2729, 5.0, 36.0450
+β_I0, c_E, c_u, ρ0, k2, c3, c5, ω_u0 =  0.4992, 0.3806, 0.3293, 0.7382, 1.0, 1.0, 1.0, 0.42
+β_e0, β_I0_min = (c_E, c_u) .* β_I0
+γ_d = trunc(Int64,get(saved, "γ_d", 0))
+ω = get(saved, "ω", 0.0)
 
-#u0 = [1.0; N; 0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0;0.0]
+ms = Msλs(dates, [k2], [c3, c5])
 
+ω_0 = get(saved, "ω_0") do
+    get_ω(t_θ0, ms, λs, max_ω, min_ω)
+end
+ω_CFR0 = get(saved, "ω_CFR0") do
+    get_ω_CFR(Int(t_θ0), data, Int(t_iCFR), γ_d)
+end
+θ_0 = get(saved, "θ0") do
+    ω_0 / ω_CFR0
+end
 
-# t=1.0
-# u0 = [1.0, N-1, 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]
-# tspan = (1.0, 446.0)
+ω_CFR = get_ω_CFR(1, data, t_iCFR, γ_d)
+θ = 1 <= t_θ0 ? ω_0 / ω_CFR0 : ω / ω_CFR
+ρ = get_ρ(ω_0, ω, θ_0, θ, ρ0)
+η = get_η(1, data, t0, tMAX, t_η, γ_E, γ_I)
 
-gam_val = γs(opt, saved)
-st_val = StaticParams(opt, saved, data, gam_val)
-ms_val = Msλs(opt, saved, dates)
-tt = TimeParams(6, opt, saved, data, st_val, ms_val, gam_val)
-tt.η
-st_val
-# be = βs(2, opt, saved, tt, ms_val, gam_val)
+p = [
+    γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, # gammas
+    k2, c3, c5,
+    ω_0, ω_CFR0, θ_0, ω,
+    β_I0, c_E, c_u, ρ0, ω_u0
+]
 
-#solution = sol(ode!, u0, tspan, [TimeParams, βs])
+# Set up the ODE problem
+prob = ODEProblem(ThetaModel!, u0, tspan, p)
 
-ga = GA(populationSize=100,selection=uniformranking(3),
-        mutation=gaussian(),crossover=uniformbin()
+# AutoVern7(Rodas5())
+sol = solve(prob, tstops=tsteps, unstable_check=check)
+
+@benchmark solve(prob, tstops=tsteps, unstable_check=check)
+λs = Float64.(dates)
+
+function multi_βs(
+    time,
+    ω, θ, ω_u0, η, ρ,
+    ms, λs,
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+    β_I0, β_e0, β_I0_min
+    )
+    for t in time[1]:time[2]
+        βs(
+        t,
+        ω, θ, ω_u0, η, ρ,
+        ms, λs,
+        γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+        β_I0, β_e0, β_I0_min
+        )
+    end
+end
+
+function multi_TimeParams(
+    time,
+    ω, θ, ω_u0, η, ρ,
+    ms, λs,
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+    β_I0, β_e0, β_I0_min
+    )
+    last_t = trunc(Int64,time[1])
+    for t in time[1]:0.1:time[2]
+        βs(
+        t,
+        ω, θ, ω_u0, η, ρ,
+        ms, λs,
+        γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+        β_I0, β_e0, β_I0_min
+        )
+    end
+end
+
+@code_warntype get_β_Iu0(θ, β_I0, β_I0_min)
+@benchmark get_β_Iu0(θ, β_I0, β_I0_min)
+@code_warntype βs(
+    1.0,
+    ω, θ, ω_u0, η, ρ,
+    ms, λs,
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+    β_I0, β_e0, β_I0_min
+)
+@benchmark βs(
+    1.0,
+    ω, θ, ω_u0, η, ρ,
+    ms, λs,
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+    β_I0, β_e0, β_I0_min
 )
 
-num_params = 16
-low = fill(0.001,num_params)
-up = fill(1.0, num_params)
-x0 = fill(0.5, num_params)
+function mul_round(a)
+    for i in 1.0:0.01:a
+        trunc(Int64, i)
+    end
+end
 
-minim_params = minim(x0, low, up, ga)
+function adder(a::Int64)
+    a + 2 * 3
+end
 
-@save "model_minimum.bson" minim_params
-@load "D:\\Code\\[Servicio Social]\\Julia\\Theta model\\model_minimum.bson" minim_params_saved
+function mul_round2(a)
+    for i in 1.0:0.01:a
+        round(Int64, i)
+    end
+end
 
-minim_found = Evolutionary.minimizer(minim_params_saved)
-minim_found = Dict(
-    "γ_Iu" => 0.2218361076416862,
-    "γ_Q" => 1.0,
-    "γ_Hr" => 0.8986061877668314,
-    "γ_Hd" => 1.0,
-    "β_I0" => 1.0,
-    "c_E" => 1.0,
-    "c_u" => 0.0,
-    "c_IDu" => 0.0,
-    "ρ0" => 0.0,
-    "ks" => [1.0],
-    "cs" => [0.0, 1.0],
-    "ω_u0" => 1.0 #
+@benchmark mul_round(10.0)
+@benchmark mul_round2(10.0)
+
+for i in 100.0:200.0
+    if i in dates
+        println(i)
+    end
+end
+
+# Plot the solution
+graf_predictions(data, sol, labels)
+
+callback = function(p, l, pred)
+    display(l)
+    plt = graf_predictions(data, pred, labels)
+    display(plt)
+    return false
+end
+
+result_ode = DiffEqFlux.sciml_train(
+    distance, p,
+    ADAM(0.0001),
+    cb = callback,
+    maxiters=200
 )
-
-Evolutionary.minimum(minim_params_saved)
-
-solution = sol(ode!, u0, tspan, [full_params,minim_found])
-
-plot(solution, vars=(0,1))
-plot(solution, vars=(0,2))
-plot(solution, vars=(0,3))
-plot(data.infec)
-plot(solution, vars=(0,4))
-plot(solution, vars=(0,5))
-plot(solution, vars=(0,6))
-plot(solution, vars=(0,7))
