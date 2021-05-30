@@ -1,6 +1,4 @@
 using Plots, Dates, DataFrames, DifferentialEquations, Flux, Optim, DiffEqFlux, DiffEqSensitivity
-#import DifferentialEquations: ODEProblem
-#import DifferentialEquations: solve as df_solve
 import CSV: File as fl
 using BSON: @save, @load
 
@@ -49,7 +47,7 @@ labels = ["Model" "Real data"]
 
 # Get the data
 path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final_complemented.csv"
-data = Data(path)
+const data = Data(path)
 
 # Time interval and intermediary points
 tspan = (100.0, 446.0)
@@ -78,6 +76,7 @@ p = [0.6, 0.037, 0.0018, 0.0165]
 # Set up the ODE problem, then solve
 prob = ODEProblem(simple_model!, u0, tspan, p)
 sol = solve(prob)
+@benchmark solve(prob)
 
 plot(sol, vars=(0,3))
 
@@ -86,7 +85,7 @@ graf_predictions(data, sol, labels)
 #savefig("D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\simple_model_ode.png")
 
 # Optimize the model
- function distance(p)
+function distance(p)
     sol = solve(prob, p=p, saveat=tsteps)
     days = map(x -> round(Int, x),sol.t)
     distance = sqrt(sum(abs2, sol[2,:].- data.infec[days]))
