@@ -2,7 +2,6 @@ using Plots, Dates, DataFrames, DifferentialEquations, Flux, Optim, DiffEqFlux, 
 import CSV: File as fl
 using BSON: @save, @load
 
-
 struct Data{N<:Vector{Int64}}
     """
     Struct that contains the data needed for the model.
@@ -45,15 +44,15 @@ end
 
 labels = ["Model" "Real data"]
 
-# Get the data
+# * Get the data
 path = "D:\\Code\\[Servicio Social]\\Datos\\Casos_Modelo_Theta_final_complemented.csv"
 const data = Data(path)
 
-# Time interval and intermediary points
+# * Time interval and intermediary points
 tspan = (100.0, 446.0)
 tsteps = 100.0:1.0:446
 
-# Inityal conditions
+# * Inityal conditions
 N = data.population[Int(tspan[1])]
 u0 = [
     data.susceptible[Int(tspan[1])],
@@ -62,7 +61,7 @@ u0 = [
     data.exposed[Int(tspan[1])]
 ]
 
-# SM equation parameter. p = [α, β, γ, σ]
+# * SM equation parameter. p = [α, β, γ, σ]
 p = [0.6, 0.037, 0.0018, 0.0165]
 # p = [0.5754835798959406,
 #     0.0033489694590588155,
@@ -70,21 +69,21 @@ p = [0.6, 0.037, 0.0018, 0.0165]
 #     0.0
 # ]
 
-# Best minimum parameters found
+# * Best minimum parameters found
 @load "D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\minimum_parameters5.bson" p
 
-# Set up the ODE problem, then solve
+# * Set up the ODE problem, then solve
 prob = ODEProblem(simple_model!, u0, tspan, p)
 sol = solve(prob)
 @benchmark solve(prob)
 
 plot(sol, vars=(0,3))
 
-# Plot the solution
+# * Plot the solution
 graf_predictions(data, sol, labels)
 #savefig("D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\simple_model_ode.png")
 
-# Optimize the model
+# * Optimize the model
 function distance(p)
     sol = solve(prob, p=p, saveat=tsteps)
     days = map(x -> round(Int, x),sol.t)
@@ -110,7 +109,7 @@ p = result_ode.minimizer
 
 @save "D:\\Code\\[Servicio Social]\\Julia\\SimpleModel\\minimum_parameters5.bson" p
 
-# Predictions
+# * Predictions
 tspan = (446.0, 2000.0)
 N = data.population[Int(tspan[1])]
 u0 = [
