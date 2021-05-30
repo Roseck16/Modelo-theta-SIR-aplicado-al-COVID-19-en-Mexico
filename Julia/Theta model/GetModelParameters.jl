@@ -137,7 +137,6 @@ end
 
 function Msλs(t0, dates::M, ks::M, cs::M) where M
     # If we have 4 dates, we need an extra one because we always set m0 = m1 to start with the first date.
-    q = length(dates) + 1
     start_index = [1]
 
     # Initialize a vector with the values of m available
@@ -358,10 +357,18 @@ function get_ω(t::M, ms::N, λs::N, max_ω::O, min_ω::O) where {M,N,O}
     return (m * max_ω) + ((1.0 - m) * min_ω)
 end
 
+"""
+    TimeParams(t, data, times, delays, ρ0, ω_0, ω_CFR0, θ_0; _ω, ms, λs, max_ω, min_ω)
+
+Calculate time-dependent parameters. If the value of _ω is not given, then it would be necessary to input the extra parameters ms, λs, max_ω, min_ω.
+
+# Arguments
+- `times::Vector{Int64}` : Vector with the values of t0, tMAX, t_iCFR, t_θ0, t_η
+- `delays::Vector{Int64}` : Vector with the values of γ_d and γ_E + γ_I
+"""
+
 function TimeParams(
-    t::M, data::Data,
-    t0::M, tMAX::M, t_iCFR::M, t_θ0::M, t_η::M,
-    γ_d::M, delay::M, 
+    t::M, data::Data, times, delays, 
     ρ0::N, # This parameter is optimized
     ω_0::N, ω_CFR0::N, θ_0::N; # These parameters can be calculated from others
     _ω=nothing, # If the value of ω is given, these 
@@ -371,9 +378,9 @@ function TimeParams(
     min_ω=nothing
     ) where {M,N}
     ω = isnothing(_ω) ? get_ω(t, ms, λs, max_ω, min_ω) : _ω
-    ω_CFR = get_ω_CFR(t, data, t_iCFR, γ_d)
-    θ = t <= t_θ0 ? ω_0 / ω_CFR0 : ω / ω_CFR
-    η = get_η(t, data, t0, tMAX, t_η, delay)
+    ω_CFR = get_ω_CFR(t, data, times[3], delays[1])
+    θ = t <= times[4] ? ω_0 / ω_CFR0 : ω / ω_CFR
+    η = get_η(t, data, times[1], times[2], times[5], delays[2])
     ρ = get_ρ(ω_0, ω, θ_0, θ, ρ0)
     
     return ω, θ, η, ρ, 0, data.imported[t]
