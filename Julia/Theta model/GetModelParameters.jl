@@ -1,4 +1,5 @@
 import CSV:File as fl
+using Zygote: @ignore
 using Dates, DataFrames
 
 """
@@ -93,7 +94,7 @@ function get_t_η(data::Data, delay::M) where M
     return 0
 end
 
-function Msλs_calculate(ms, start_index, t0, dates::N, ks::N) where N
+function Msλs_calculate(ms, start_index, t0, dates, ks)
     k = ks[start_index]
     t = dates[start_index]
     tr = if start_index === 1
@@ -118,7 +119,7 @@ Inner loop of the `Msλs` function
 - `cs`
 """
 
-function Msλs_loop!(ms, ms_index, start_index, t0, dates::N, ks::N, cs::N) where N
+function Msλs_loop!(ms, ms_index, start_index, t0, dates, ks, cs)
     for index in 1:length(ms)
         if index ∉ ms_index
             # These m's depend on another m
@@ -134,24 +135,11 @@ function Msλs_loop!(ms, ms_index, start_index, t0, dates::N, ks::N, cs::N) wher
     end
 end
 
-
-function Msλs(t0, dates::M, ks::M, cs::M) where M
+function Msλs(t0, dates, ms, ms_index, ks, cs)
     # If we have 4 dates, we need an extra one because we always set m0 = m1 to start with the first date.
     start_index = [1]
 
-    # Initialize a vector with the values of m available
-    ms = [
-        1.0, # m0
-        1.0, # m1
-        0.0, 
-        0.0, 
-        0.0, # m4 
-        0.0
-    ]
-
-    ms_index = [1,2,5]
-
-    Msλs_loop!(ms, ms_index, start_index, t0, dates, ks, cs)
+    @ignore Msλs_loop!(ms, ms_index, start_index, t0, dates, ks, cs)
     return ms
 end
 
@@ -200,49 +188,54 @@ function get_ð_greater(t::M, data::Data, delay::M) where M
     return get_ð_greater_loop(q, index1, num1, den1, infec, infec_medic)
 end
     
-function get_η_case1!(_sum, t0, t_η, data, delay)
+function get_η_case1!(t0, t_η, data, delay)
+    total = 0.0
     for i in 0:6
-        _sum[1] += if t0 + i <= t_η
+        total += if t0 + i <= t_η
             get_ð_less(t_η, data, delay)
         else
             get_ð_greater(t0 + i, data, delay)
         end
     end
+    return total
 end
 
-function get_η_case2!(_sum, t, t_η, data, delay)
+function get_η_case2!(t, t_η, data, delay)
+    total = 0.0
     for i in -3:3
-        _sum[1] += if t + i <= t_η
+        total += if t + i <= t_η
             get_ð_less(t_η, data, delay)
         else
             get_ð_greater(t + i, data, delay)
         end
     end
+    return total
 end
 
-function get_η_case3!(_sum, t0, tMAX, t_η, data, delay)
+function get_η_case3!(t0, tMAX, t_η, data, delay)
+    total = 0.0
     for i in 0:6
-        _sum[1] += if t0 + tMAX - i <= t_η
+        total += if t0 + tMAX - i <= t_η
             get_ð_less(t_η, data, delay)
         else
             get_ð_greater(t0 + tMAX - i, data, delay)
         end
     end
+    return total
 end
 
 function get_η(t::M, data::Data, t0::M, tMAX::M, t_η::M, delay::M) where M
-    _sum = [0.0]
-    if t < t0 + 3
-        get_η_case1!(_sum, t0, t_η, data, delay)
+    _sum = if t < t0 + 3
+        get_η_case1!(t0, t_η, data, delay)
     elseif t0 + 3 <= t && t <= t0 + tMAX - 3
-        get_η_case2!(_sum, t, t_η, data, delay)
+        get_η_case2!(t, t_η, data, delay)
     elseif t > t0 + tMAX - 3
-        get_η_case3!(_sum, t0, tMAX, t_η, data, delay)
+        get_η_case3!(t0, tMAX, t_η, data, delay)
     else
         error("None of the 't' values matched in 'get_n': $(t)")
     end
 
-    return _sum[1] / 7.0
+    return _sum / 7.0
 end
 
 """
@@ -256,7 +249,7 @@ end
 - `ρ0::Float64` : Value of ρ0.
 
 """
-function get_ρ(ω_0::M, ω::M, θ_0::M, θ::M, ρ0::M) where M
+function get_ρ(ω_0, ω, θ_0, θ, ρ0)
     dif = θ - ω
     dif_0 = θ_0 - ω_0
 
@@ -403,14 +396,33 @@ function get_β_Iu0(θ, val1, val2)
     error("θ greater than 1")
 end
 
+# βs(
+#     ::Int64, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, Nothing}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::Float64, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, Nothing}, 
+#     ::Vector{ReverseDiff.TrackedReal{Float64, Float64, Nothing}}, 
+#     ::Vector{Float64}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}, 
+#     ::ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}
+# )
+
 function βs(
-    t::M, 
-    ω::N, θ::N, ω_u0::N, η::N, ρ::N, 
-    ms::O, λs::O,
-    γ_E::N, γ_I::N, γ_Iu::N, γ_Hr::N, γ_Hd::N, 
-    β_I0::N, β_e0::N, β_I0_min::N
+    t, 
+    ω, θ, ω_u0, η, ρ, 
+    ms, λs,
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
+    β_I0, β_e0, β_I0_min
     # β_I0::N, c_E::N, c_u::N
-    ) where {M,N,O}
+    )
 
     # β_e0, β_I0_min = (c_E, c_u) .* β_I0
 
