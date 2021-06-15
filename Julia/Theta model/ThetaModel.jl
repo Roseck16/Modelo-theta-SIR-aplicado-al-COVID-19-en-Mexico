@@ -1,89 +1,20 @@
 using DifferentialEquations
-include("GetModelParameters.jl")
+#include("GetModelParameters.jl")
 
-function ThetaModel!(du::M, u::M, p::M, t::Float64) where {M<:Vector{Float64}}
-    S, E, I, Iu, hr, hd = u
-    γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, k2, c3, c5, ω_0, ω_CFR0, θ_0, ω, β_I0, β_e0, β_I0_min, ρ0, ω_u, θ, η, ρ, τ1, τ2, β_e, β_I, β_Iu, β_hr, β_hd = p
-
-    delays = rounder!(γ_d, γ_E+γ_I)
-    actual = round(Int64, t)
-    # * Calculate new time-parameters only when the rounded value of *t* has changed
-    if t in tsteps::StepRangeLen
-        ω, θ, η, ρ, τ1, τ2 = TimeParams(
-            actual, data,
-            times, delays,
-            ρ0, ω_0, ω_CFR0, θ_0, _ω=ω
-        )
-    end
-
-    # * Calculate new βs only when *t* hits one of the values in *dates*
-
-    if t in dates
-        ms = Msλs(
-            convert(Float64,times[1]), dates, 
-            ms_val,
-            ms_index,
-            [k2], [c3, c5]
-        )
-        β_e, β_I, β_Iu, β_hr, β_hd = βs(
-            actual, 
-            ω, θ, ω_u, η, ρ, 
-            ms, dates, 
-            γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
-            β_I0, β_e0, β_I0_min
-        )
-    end
-
-    # * ODE system
-    # du[1] = -(S/N) * b1
-    # du[2] = (S/N) * b1 - E/γ_E + τ1 - τ2
-    du[1] = -(S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd)
-    du[2] = (S / N::Float64) * (β_e * E + β_I * I + β_Iu * Iu + β_hr * hr + β_hd * hd) - E/γ_E + τ1 - τ2
-    du[3] = E/γ_E - I/γ_I
-    du[4] = (1 - θ - ω_u) * I/γ_I - Iu/γ_Iu
-    # du[5] = ω_u * I/γ_I
-    du[5] = ρ * (θ - ω) * I/γ_I - hr/γ_Hr
-    du[6] = ω * I/γ_I - hd/γ_Hd
-    # du[7] = (1 - ρ) * (θ - ω) * I/γ_I + hr/γ_Hr - γ_Q * Q
-    # du[8] = Q/γ_Q
-    # du[9] = Iu/γ_Iu
-    # du[10] = hd/γ_Hd
-end
-
-# * Model for when the input parameters are ReverseDiff.TrackedReal()
+# * Model for when the input parameters are ReverseDiff.TrackedReal
 function ThetaModel!(du, u, p, t)
     #S, E, I, Iu, hr, hd, Q, _, _, _ = u
     S, E, I, Iu, hr, hd = u
-    γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, k2, c3, c5, ω_0, ω_CFR0, θ_0, ω, β_I0, β_e0, β_I0_min, ρ0, ω_u, θ, η, ρ, τ1, τ2, β_e, β_I, β_Iu, β_hr, β_hd = p
-
-    delays = rounder!(γ_d, γ_E+γ_I)
+    
+    # * Get the time parameters from *p*
     actual = round(Int64, t)
-    # * Calculate new time-parameters only when the rounded value of *t* has changed
-    if t in tsteps::StepRangeLen
-        ω, θ, η, ρ, τ1, τ2 = TimeParams(
-            actual, data,
-            times, delays,
-            ρ0, ω_0, ω_CFR0, θ_0, _ω=ω
-        )
-    end
+    
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q = p[actual,1], p[actual,2], p[actual,3], p[actual,4], p[actual,5], p[actual,6]
 
-    # * Calculate new βs only when *t* hits one of the values in *dates*
+    ω_u = p[actual, 10]
 
-    if t in dates
-        ms = Msλs(
-            convert(Float64,times[1]), dates, 
-            ms_val_tracked,
-            ms_index,
-            [k2], [c3, c5]
-        )
-        β_e, β_I, β_Iu, β_hr, β_hd = βs(
-            actual, 
-            ω, θ, ω_u, η, ρ, 
-            ms, dates, 
-            γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
-            β_I0, β_e0, β_I0_min
-        )
-    end
+    ω, τ1, τ2, θ, ρ = p[actual, 7], p[actual,8], p[actual,9], p[actual,11], p[actual,12]
+    β_e, β_I, β_Iu, β_hr, β_hd = p[actual,13], p[actual,14], p[actual,15], p[actual,16], p[actual,17]
 
     # * ODE system
     # du[1] = -(S/N) * b1
@@ -116,57 +47,29 @@ function check(dt, u, p, t)
 end
 
 # TODO: update this function according to the model function
-function paramsModel(γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, ρ0, k2, c3, c5, β_I0, β_e0, β_I0_min, ω_u0)
-    γ_d = 13.123753454738198
-    delays = rounder!(γ_d, γ_E+γ_I)
-    ω = 0.014555
-    ω_0 = 0.50655
-    ω_CFR0 = 147.71428571428572
-    θ_0 = ω_0 / ω_CFR0
-    
-    _, θ, η, ρ, τ1, τ2 = TimeParams(
-        1, data, 
-        times, 
-        delays,
-        ρ0, ω_0, ω_CFR0, θ_0, _ω=ω
-        )
-    ρ = get_ρ(ω_0, ω, θ_0, θ, ρ0)
-    ms = Msλs(
-        convert(Float64,times[1]), dates, 
-        ms_val,
-        ms_index,
-        [k2], [c3, c5]
-    )
-    β_e, β_I, β_Iu, β_hr, β_hd = βs(
-        1, 
-        ω, θ, ω_u0, η, ρ, 
-        ms, dates,
-        γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, 
-        β_I0, β_e0, β_I0_min
-    )
-    return [
-        γ_d, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q,
-        k2, c3, c5,
-        ω_0, ω_CFR0, θ_0, ω,
-        β_I0, β_e0, β_I0_min, ρ0, ω_u0,
-        θ, η, ρ, τ1, τ2,
-        β_e, β_I, β_Iu, β_hr, β_hd
-    ]
-end
 
 function distance(x)
 
-    # Assing the values in ´x´ to a variable
-    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, β_I0, c_E, c_u, ρ0, k2, c3, c5, ω_u0 = x
+    #* Assing the values in ´x´ to a variable
+    γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, β_I0, c_E, c_u, ρ0, k2, c3, c5, ω_u0, max_ω, min_ω = x
     β_e0, β_I0_min = (c_E, c_u) .* β_I0
 
-    # Get some of the parameters that are known
-    p = paramsModel(γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, ρ0, k2, c3, c5, β_I0, β_e0, β_I0_min, ω_u0)
+    #* Get some of the parameters that are known
+    delays = Delays(γ_Hd, γ_E + γ_I)
+    times = Times(tspan::Tuple{Float64,Float64}, data, delays)
+
+    ms = Msλs(
+        convert(Float64,times.t0), dates, 
+        ms_val,
+        [k2], [c3, c5]
+    )
+    p = parameters_lists(times, data, delays, ms, dates, max_ω, min_ω, ω_u0, ρ0, β_I0, β_e0, β_I0_min, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q)
     # Solve the ODE problem and calculate the difference between the solution and the real data
     
     sol = solve(
         prob::ODEProblem, 
-        p=p, 
+        p=p,
+        #unstable_check=check,
         tstops=tsteps::StepRangeLen,
         verbose=false
     )
@@ -176,7 +79,7 @@ function distance(x)
     return distance, sol
 end
 
-function graf_predictions(data::Data, solution::OrdinaryDiffEq.ODECompositeSolution, labels::Matrix{String})
+function graf_predictions(data::Data, solution, labels::Matrix{String})
     xs = map(x -> round(Int64, x),solution.t)
     ys = [solution[3,:], data.infec[xs]]
     plot(xs,ys, label=labels)
