@@ -49,8 +49,11 @@ struct Times
         t_iCFR = get_t_iCFR(data, delays.γ_Hd)
         t_η = get_t_η(data, delays.γ_E_I)
         new(
-            Int(tspan[1]), Int(tspan[2]),
-            t_η, t_iCFR, t_iCFR+6
+            Int(tspan[1]), 
+            Int(tspan[2]),
+            t_η, 
+            t_iCFR, 
+            t_iCFR+6
         )
     end
 end
@@ -528,10 +531,12 @@ end
 
 
 function parameters_lists_loop1(i, times, data, delays, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, γ_Q, ω_u0, ms, λs, max_ω, min_ω, iCFRs, ðs, destination)
+    
     iCFR = @ignore get_iCFR(i, times, data, delays.γ_Hd, iCFRs)
     ð = @ignore get_ð(i, times, data, delays.γ_E_I, ðs)
     ω = get_ω(i, ms, λs, max_ω, min_ω)
     τ2 = convert(typeof(max_ω), data.imported[i])
+
     new_iCFRs = vcat(iCFRs, iCFR)
     new_ðs = vcat(ðs, ð)
     new_params = vcat(
@@ -553,13 +558,13 @@ function parameters_lists_loop2(times, ms, λs, ω_u0, ρ0, β_I0, β_e0, β_I0_
     θs = get_θs(2, times, destination[:,7], ω_CFRs, get_θ(1, times, destination[:,7], ω_CFRs))
     ω_θ0 = destination[times.t_θ0,7]
     ρs = get_ρs(
-        2, times::Times, 
-        ω_θ0, θs[times.t_θ0], destination[:,7], θs, ρ0, 
+        2, times::Times,
+        ω_θ0, θs[times.t_θ0], destination[:,7], θs, ρ0,
         get_ρ(ω_θ0, destination[1,7], θs[times.t_θ0], θs[1], ρ0)
     )
     βs = get_βs(
-        2, times, ms, λs, β_I0, β_e0, β_I0_min, ω_u0, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, destination[:,9], θs, ηs, ρs, 
-        get_β(1, ms, λs, β_I0, β_e0, β_I0_min, ω_u0, destination[1,9], θs[1], ηs[1], ρs[1], γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd)
+        2, times, ms, λs, β_I0, β_e0, β_I0_min, ω_u0, γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd, destination[:,7], θs, ηs, ρs, 
+        get_β(1, ms, λs, β_I0, β_e0, β_I0_min, ω_u0, destination[1,7], θs[1], ηs[1], ρs[1], γ_E, γ_I, γ_Iu, γ_Hr, γ_Hd)
     )
 
     return hcat(destination, θs, ρs, βs)

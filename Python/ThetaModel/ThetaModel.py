@@ -2,195 +2,117 @@
 import pandas as pd
 import math
 import numpy as np
-from get_parameters_class import SaveData, GetParameters
-from scipy.integrate import odeint
+import matplotlib.pyplot as plt
+from GetModelParameters import *
+from scipy.integrate import solve_ivp
 from geneticalgorithm import geneticalgorithm as ga
 
 #%%
-class ThetaModel:
-    """
-    Clase que define el modelo theta-SIR
-    """
+def thetaModel(t, y, N, gammas, p):
+    S, E, I, I_u, Hr, Hd = y
+    actual = math.floor(t)
 
-    def __init__(self, saved, lambdas, N=127575529):
-        """
-        Parámetros 
-        ----------
-        fecha_inicio: string
-            Texto con la fecha inicial que se desea estudiar.
-            Ejemplo: fecha_inicio = '2020-03-01'
+    gamma_E, gamma_I, gamma_Iu, gamma_Hr, gamma_Hd, gamma_Q = gammas.__fields__()
+    omega, tau1, tau2, omega_u = p[actual,0], p[actual,1], p[actual,2], p[actual,3]
+    theta, rho = p[actual,4], p[actual,5]
+    beta_e, beta_I, beta_Iu, beta_hr, beta_hd = p[actual,6], p[actual,7], p[actual,8], p[actual,9], p[actual,10]
 
-        fecha_fin: string
-            Texto con la fecha final que se desea estudiar.
-            Ejemplo: fecha_fin = '2020-12-31'
+    betas_mul = beta_e*E + beta_I*I + beta_Iu*I_u + beta_hr*Hr + beta_hd*Hd
+    newE = E/gamma_E
+    newI = I/gamma_I
+    newIu = I_u/gamma_Iu
+    newHr = Hr/gamma_Hr
+    newHd = Hd/gamma_Hd
 
-        N: número
-            Número de personas antes de la pandemia.
-        """
-        self.saved = saved
-        self.lambdas = lambdas
-        self.N = N
+    dSdt = -(S/N) * betas_mul
+    dEdt = (S/N) * betas_mul - newE + tau1 - tau2
+    dIdt = newE - newI
+    dIudt = (1 - theta - omega_u) * newI - newIu
+    dHrdt = rho*(theta - omega) * newI - newHr
+    dHddt = omega * newI - newHd
 
-    def conseguir_datos(self, path):
-        """
-        
-        """
-        data = pd.read_csv(path)
-        d_i_f_im = [
-            data["Fecha"], 
-            data["Positivos"], 
-            data["Fallecidos"], 
-            data["Positivos medicos"],
-            data["Importados"]
+    # dydt = [
+    #     -(S/N) * (beta_e*E + beta_I*I + beta_Iu*I_u + beta_hr*Hr + beta_hd*Hd),
+    #     (S/N) * (beta_e*E + beta_I*I + beta_Iu*I_u + beta_hr*Hr + beta_hd*Hd) - E/gamma_E + tau1 - tau2,
+    #     E/gamma_E - I/gamma_I,
+    #     (1 - theta - omega_u) * I/gamma_I - I_u/gamma_Iu,
+    #     #omega_u * I/,
+    #     rho*(theta - omega) * I/gamma_I - Hr/gamma_Hr,
+    #     omega * I/gamma_I - Hd/gamma_Hd,
+    #     # ---------------------------
+    #     #(1 - rho) * (theta - omega) * I/gamma_I + Hr/gamma_Hr - Q/gamma_Q,
+    #     #Q/gamma_Q,
+    #     #I_u/gamma_Iu,
+    #     #Hd/gamma_Hd,
+    # ]
+    return dSdt, dEdt, dIdt, dIudt, dHrdt, dHddt
+
+#%%
+class OptimizeModel:
+
+    def __init__(self, path, t0, tMAX, lambdas, ms_val):
+        self.data = Data(path)
+        self.tspan = np.arange(t0, tMAX)
+        self.dates = get_lambdas(lambdas, self.data)
+        self.N = self.data.population[t0]
+        self.u0 = [
+            self.data.susceptible[t0],
+            self.data.exposed[t0],
+            self.data.infec[t0],
+            self.data.infec_u[t0],
+            self.data.hospitalized[t0],
+            self.data.hospitalized[t0]*0.3,
         ]
-        self.dias = d_i_f_im[0]
-        self.positivos = d_i_f_im[1]
-        self.data =  d_i_f_im
+        self.ms_val = ms_val
 
-    def day_to_index(self, day):
-        if type(day) == str:
-            return self.dias.loc[self.dias == day].index.values[0]
-        elif type(day) == np.ndarray:
-            return list(
-                map(
-                    lambda x: self.dias.loc[self.dias == x].index.values[0], day
-                )
-            )
-        elif type(day) in (int, np.int64):
-            return day
-        else:
-            raise TypeError("Unexpected type for variable 'day': {}".format(type(day)))
-
-    def modelo_theta_sir(self, y, t, b_I0, c_E, c_u, c_IDu, p0):
-        """
-        Definición del modelo Theta-SIR. vectores 'betas', 'gammas'
-        y 'extras' tienen que tener un orden específico que se basa
-        en el orden en el que aparecen en las ecuaciones del artículo.
-        Ese orden se describe a continuación.
-
-        Parametros
-        ----------
-
-        betas: ndarray
-            vector con los valores de los coeficientes beta. Su orden debe ser el siguiente:
-            betas = [B_E, B_I, B_{I_U}, B_{I_{D_u}}, B_{H_R}, B_{H_D}]
-
-        gammas: ndarray
-            vector con los valores de los coeficientes gamma. Su orden debe ser el siguiente:
-            gammas = [Gamma_E, Gamma_I, Gamma_{I_U}, Gamma_{I_{D_u}}, Gamma_{H_D}, Gamma_{H_R}, Gamma_Q]
-        extras: ndarray
-            vector con los valores de parámetros faltantes. Su orden debe ser el siguiente:
-            extras = [N, theta, omega_u, P, omega]
-        """
-        betas = self.param_class.get_betas(
-            t,
-            self.saved,
-            b_I0=b_I0, 
-            c_E=c_E, 
-            c_u=c_u, 
-            c_IDu=c_IDu, 
-            p0=p0
-        )
-        gammas = self.param_class.gammas
-        index = t if t <= len(self.dias) else len(self.dias)
-        extras = np.array([
-                self.N, 
-                self.param_class.theta, 
-                self.param_class.w_u0, 
-                self.param_class.p, 
-                self.param_class.w, 
-                self.data[4].iloc[int(index)],
-                0
-            ])
-        be, bi, biu, bidu, bhr, bhd = [i for i in betas.T]
-        ge, gi, giu, gidu, ghr, ghd, gq = [i for i in gammas.T]
-        N, theta, wu, p, w, t1, t2 = [i for i in extras.T]
-        
-        S, E, I, I_u, I_du, H_r, H_d, Q, R_d, R_u, D_u, D = y
-        dydt = [
-            -(S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d), # 1 Susceptibles
-            (S/N) * (be*E + bi*I + biu*I_u + bidu*I_du + bhr*H_r + bhd*H_d) - ge*E + t1 - t2, # 2 Expuestos
-            ge*E - gi*I, # 3 Infectados
-            (1 - theta - wu) * gi*I - giu*I_u, # 4 Infectados no detectados
-            wu*gi*I - gidu*I_du, # 5 Infectados no detectados que morirán
-            p*(theta - w)*gi*I - ghr*H_r, # 6 Hospitalizados que se van a recuperar
-            w*gi*I - ghd*H_d, # 7 Hospitalizados que van a fallecer
-            # ---------------------------
-            (1 - p) * (theta - w) * gi*I + ghr*H_r - gq*Q, # 8 En cuarentena
-            gq*Q, # 9 Recuperados después de ser detectados infectados
-            giu*I_u, # 10 Recuperados después de ser detectados infectados pero no detectados
-            gidu*I_du, # 11 Fallecidos por COVID-19
-            ghd*H_d, # 12 Fallecidos por COVID-19 pero no detectados
-        ]
-        return dydt
-
-    def solucion(self, t, b_I0, c_E, c_u, c_IDu, p0):
-        return odeint(
-            self.modelo_theta_sir, 
-            [1, self.N-1, 0,0,0,0,0,0,0,0,0,0], 
-            t,
-            args=(b_I0, c_E, c_u, c_IDu, p0)
-        )
-
-    
     def distance(self, X):
-        """
-        Se obtienen las variables a optimizar a partir del argumento 'X' y se obtienen los parámetros que necesita el modelo utilizando la clase 'GetParameters', con los que se obtiene una solución del modelo.
-        Luego resta término a término el vector de soluciones y el vector
-        de datos reales, los eleva al cuadrado, suma el resultado y regresa el resultado.
-        """
-        gamma_Iu, gamma_Hr, gamma_Hd, gamma_Q, b_I0, c_E, c_u, c_IDu, p0, k2, c3, c5, w_u0 = X
-        
-        # ks = np.array([k1])
-        cs = np.array([c3, c5])
-        ks = np.array([k2])
-        q = len(self.dias)
 
-        params = GetParameters(
-            self.data, 
-            0, 
-            self.saved, 
-            gamma_Iu=gamma_Iu, 
-            gamma_Hr=gamma_Hr, 
-            gamma_Hd=gamma_Hd, 
-            gamma_Q=gamma_Q,
-            w_u0=w_u0
+        gamma_E, gamma_I, gamma_Iu, gamma_Hr, gamma_Hd, gamma_Q, c3, c5, omega_u0, max_omega, min_omega, c_E, c_u, beta_I0, rho0, k2 = X
+        beta_I0_min, beta_e0 = c_E * beta_I0, c_u * beta_I0
+
+        gammas = Gammas(gamma_E, gamma_I, gamma_Iu, gamma_Hr, gamma_Hd, gamma_Q)
+        delays = Delays(gammas)
+        times = Times(self.tspan, self.data, delays)
+        
+        ms = get_Ms(
+            self.tspan[0], self.dates, self.ms_val, 
+            np.array([k2]),
+            np.array([c3, c5])
         )
 
-        params.get_ms(self.saved, self.lambdas, ks=ks, cs=cs)
-        self.param_class = params
+        p = parameters_list(times, self.data, gammas, delays, ms, self.dates, max_omega, min_omega, omega_u0, rho0, beta_I0, beta_I0_min, beta_e0)
         
-        sol = self.solucion(
-            np.arange(q), 
-            b_I0, c_E, c_u, c_IDu, p0
+        sol = solve_ivp(thetaModel, self.tspan, self.u0, args=(self.N, gammas, p), dense_output=True)
+        u = sol.sol(self.tspan)
+        distance = math.sqrt(np.sum(list(
+            map(
+                lambda x: x**2, 
+                u.T[:,2] - self.data.infec
+            )
+        )))
+        #print(distance)
+
+        return distance
+
+    def genetic_alg(self, bounds, params, timeOut=10.0):
+        model = ga(
+            function=self.distance,
+            dimension=bounds.shape[0],
+            variable_type='real',
+            variable_boundaries=bounds,
+            algorithm_parameters=params,
+            function_timeout=timeOut
         )
-        dis = 0
 
-        for indice in range(q-1):
-            dis += (sol[:,2][indice] - self.positivos.iloc[indice])**2
-
-        return math.sqrt(dis)
-
-    def minimize(self, bounds, dims=16, params=None, **kwargs):
-        funtimeout = kwargs.get('funtimeout', 10.0)
-        vartype = kwargs.get('vartype', 'int')
-
-        if params is None:
-            model = ga(
-                function=self.distance,\
-                dimension=dims,\
-                variable_type=vartype,\
-                variable_boundaries=bounds,
-                function_timeout= funtimeout
-            )
-        else:
-            model = ga(
-                function=self.distance,\
-                dimension=dims,\
-                variable_type=vartype,\
-                variable_boundaries=bounds,\
-                function_timeout= funtimeout,
-                algorithm_parameters=params
-            )
-        model.run()
         return model
+
+#%%
+def graf_model(sol, data, tspan, W=15, H=10):
+    fig = plt.figure()
+    fig.set_figwidth(W)
+    fig.set_figheight(H)
+    plt.plot(tspan, sol.T[:,2])
+    plt.plot(tspan, data.infec[tspan])
+    plt.grid()
+    plt.show()
+# %%

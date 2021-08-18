@@ -101,7 +101,7 @@ end
 
 result_ode = DiffEqFlux.sciml_train(
     distance, p,
-    ADAM(0.01),
+    ADAM(0.5),
     cb = callback,
     maxiters=10
 )
